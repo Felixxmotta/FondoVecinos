@@ -714,7 +714,7 @@ def evaluate_participant_status(person_name, df_ahorros, df_flujo):
     }
 
 # Helper function to parse amortization schedules
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 def parse_amortization_tables(url):
     df = pd.read_excel(url, sheet_name='AMORTIZACIONES', header=None)
     tables = {}
@@ -727,8 +727,13 @@ def parse_amortization_tables(url):
         val_str = str(val_0).strip().upper() if not pd.isna(val_0) else ""
         if val_str in ['#', 'FECHA / #', 'FECHA'] or val_str.startswith('#') or 'NOMBRE:' in val_str:
             r_init = r + 1
-            init_bal = df.iloc[r_init, 4]
-            init_fecha_col0 = df.iloc[r_init, 0]
+            init_bal = df.iloc[r_init, 4] if r_init < num_rows else 0.0
+            init_fecha_col0 = df.iloc[r_init, 0] if r_init < num_rows else ""
+            
+            # Try extracting name or ID from header
+            clean_name = re.sub(r'[\#\-\d]|(\(CRÉDITO\))|(\(SOCIO\))|(\(CREDITO\))', '', val_str, flags=re.IGNORECASE).strip().upper()
+            match_id = re.search(r'#\s*(\d+)', val_str)
+            extracted_id = int(match_id.group(1)) if match_id else None
             
             payments = []
             r_pay = r + 2
@@ -751,11 +756,23 @@ def parse_amortization_tables(url):
                 
                 try:
                     v_cuota = float(val_cuota)
+                except (ValueError, TypeError):
+                    v_cuota = 0.0
+                    
+                try:
                     v_abono = float(df.iloc[r_pay, 2])
+                except (ValueError, TypeError):
+                    v_abono = 0.0
+                    
+                try:
                     v_int = float(df.iloc[r_pay, 3])
+                except (ValueError, TypeError):
+                    v_int = 0.0
+                    
+                try:
                     v_saldo = float(df.iloc[r_pay, 4])
                 except (ValueError, TypeError):
-                    break
+                    v_saldo = 0.0
 
                 payments.append({
                     'Cuota / Fecha': label_col0,
@@ -784,20 +801,31 @@ def parse_amortization_tables(url):
                 init_label = str(init_fecha_col0).strip()
                 if init_label.endswith('.0'): init_label = init_label[:-2]
 
+            try:
+                init_bal_float = float(init_bal) if not pd.isna(init_bal) else 0.0
+            except (ValueError, TypeError):
+                init_bal_float = 0.0
+
             init_row = pd.DataFrame([{
                 'Cuota / Fecha': init_label,
                 'Valor Cuota': np.nan,
                 'Abono a Capital': np.nan,
                 'Intereses': np.nan,
-                'Saldo Pendiente': float(init_bal) if not pd.isna(init_bal) else 0.0
+                'Saldo Pendiente': init_bal_float
             }])
             df_table = pd.concat([init_row, df_table], ignore_index=True)
             
-            tables[loan_idx] = {
-                'initial_balance': float(init_bal) if not pd.isna(init_bal) else 0.0,
+            table_entry = {
+                'initial_balance': init_bal_float,
                 'total_interest_calculated': total_interest,
                 'schedule': df_table
             }
+            
+            tables[loan_idx] = table_entry
+            if extracted_id is not None:
+                tables[extracted_id] = table_entry
+            if clean_name:
+                tables[clean_name] = table_entry
             
             loan_idx += 1
             r = r_pay
@@ -920,12 +948,12 @@ def load_data(url):
     if 'Estado' not in df_flujo.columns:
         df_flujo['Estado'] = 'Activo'
         
-    # Auto-correct tiny floating point residual balances (<= 1.0 COP)
+    # Auto-correct tiny floating point residual balances (<= 5.0 COP)
     if 'Saldo Pendiente' in df_flujo.columns:
         saldos_num = pd.to_numeric(df_flujo['Saldo Pendiente'], errors='coerce').fillna(0)
-        df_flujo.loc[saldos_num <= 1.0, 'Estado'] = 'Cancelado'
+        df_flujo.loc[saldos_num <= 5.0, 'Estado'] = 'Cancelado'
         if 'Estado del credito' in df_flujo.columns:
-            df_flujo.loc[saldos_num <= 1.0, 'Estado del credito'] = 'Cancelado'
+            df_flujo.loc[saldos_num <= 5.0, 'Estado del credito'] = 'Cancelado'
     
     # Try reading whatsapp # sheet
     df_whatsapp = pd.DataFrame()
@@ -1292,10 +1320,36 @@ if data_loaded:
                     
                     # Amortization Table Summary
                     st.markdown("<h4 style='margin-top: 18px;'>📑 Tabla de Amortización (Control de Cuotas)</h4>", unsafe_allow_html=True)
-                    loan_id = int(loan['ID'])
+                    try:
+                        loan_id = int(loan['ID']) if 'ID' in loan and not pd.isna(loan['ID']) else None
+                    except (ValueError, TypeError):
+                        loan_id = None
+                        
+                    loan_person_name = str(loan.get('Nombre', selected_person)).strip().upper()
+                    clean_person_name = re.sub(r'[\#\-\d]|(\(CRÉDITO\))|(\(SOCIO\))|(\(CREDITO\))', '', loan_person_name, flags=re.IGNORECASE).strip().upper()
                     
-                    if loan_id in amort_tables:
-                        schedule_df = amort_tables[loan_id]['schedule'].copy()
+                    # Compute sequential loan index for this row in df_flujo
+                    flujo_loan_idx = None
+                    try:
+                        # Find 1-based row index in df_flujo
+                        flujo_loan_idx = int(df_flujo[df_flujo['ID'] == loan_id].index[0]) + 1 if loan_id is not None and len(df_flujo[df_flujo['ID'] == loan_id]) > 0 else None
+                    except Exception:
+                        flujo_loan_idx = None
+
+                    matched_table = None
+                    if loan_id is not None and loan_id in amort_tables:
+                        matched_table = amort_tables[loan_id]
+                    elif clean_person_name in amort_tables:
+                        matched_table = amort_tables[clean_person_name]
+                    elif loan_person_name in amort_tables:
+                        matched_table = amort_tables[loan_person_name]
+                    elif flujo_loan_idx is not None and flujo_loan_idx in amort_tables:
+                        matched_table = amort_tables[flujo_loan_idx]
+                    elif (idx + 1) in amort_tables:
+                        matched_table = amort_tables[idx + 1]
+                    
+                    if matched_table:
+                        schedule_df = matched_table['schedule'].copy()
                         
                         html_rows = []
                         for idx_p, r_item in schedule_df.iterrows():
