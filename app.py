@@ -734,11 +734,11 @@ def find_sheet_name(excel_file, target_names):
 
 # Helper function to parse amortization schedules
 @st.cache_data(ttl=30)
-def parse_amortization_tables(url_or_excel):
-    if isinstance(url_or_excel, pd.ExcelFile):
-        excel_file = url_or_excel
+def parse_amortization_tables(_url_or_excel):
+    if isinstance(_url_or_excel, pd.ExcelFile):
+        excel_file = _url_or_excel
     else:
-        req = urllib.request.Request(url_or_excel, headers={'User-Agent': 'Mozilla/5.0'})
+        req = urllib.request.Request(_url_or_excel, headers={'User-Agent': 'Mozilla/5.0'})
         content = urllib.request.urlopen(req).read()
         excel_file = pd.ExcelFile(io.BytesIO(content))
         
