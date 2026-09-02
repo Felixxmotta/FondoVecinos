@@ -10,9 +10,27 @@
  *    (=IF(OR(REGEXMATCH(UPPER(L{fila}), "CANCEL|PAGAD|FINALIZ"), K{fila}<=5), H{fila}, 0))
  */
 
+/**
+ * HELPER PARA OBTENER PESTAÑAS DE FORMA FLEXIBLE (INSENSIBLE A MAYÚSCULAS Y PLURALES)
+ */
+function getSheetFlexible(ss, targetName) {
+  if (!ss) return null;
+  var sheets = ss.getSheets();
+  var targetUpper = targetName.trim().toUpperCase();
+  for (var i = 0; i < sheets.length; i++) {
+    var sName = sheets[i].getName().trim().toUpperCase();
+    if (sName === targetUpper) return sheets[i];
+  }
+  for (var i = 0; i < sheets.length; i++) {
+    var sName = sheets[i].getName().trim().toUpperCase();
+    if (sName.indexOf(targetUpper) !== -1 || targetUpper.indexOf(sName) !== -1) return sheets[i];
+  }
+  return null;
+}
+
 function registrarNuevo() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetForm = ss.getSheetByName("REGISTRO NUEVO");
+  var sheetForm = getSheetFlexible(ss, "REGISTRO NUEVO");
   
   if (!sheetForm) {
     SpreadsheetApp.getUi().alert("⚠️ Error: No se encontró la pestaña 'REGISTRO NUEVO'.");
@@ -45,9 +63,9 @@ function registrarNuevo() {
 
   var tasaDecimal = (tasaInput > 1) ? (tasaInput / 100.0) : tasaInput;
   
-  var sheetFlujo = ss.getSheetByName("Flujo prestamos");
-  var sheetAmort = ss.getSheetByName("AMORTIZACIONES");
-  var sheetAhorros = ss.getSheetByName("Control Ahorros");
+  var sheetFlujo = getSheetFlexible(ss, "FLUJO PRESTAMOS");
+  var sheetAmort = getSheetFlexible(ss, "AMORTIZACIONES");
+  var sheetAhorros = getSheetFlexible(ss, "CONTROL AHORRO");
   
   if (isSocioNuevo && sheetAhorros) {
     var lastRowAhorros = sheetAhorros.getLastRow();
@@ -148,7 +166,7 @@ function registrarNuevo() {
  */
 function colorearFlujoPrestamos() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetFlujo = ss.getSheetByName("Flujo prestamos");
+  var sheetFlujo = getSheetFlexible(ss, "FLUJO PRESTAMOS");
   if (!sheetFlujo) return;
   
   var ids = sheetFlujo.getRange("A2:A").getValues();
@@ -198,7 +216,7 @@ function colorearFlujoPrestamos() {
  */
 function repararTodasLasFormulas() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetFlujo = ss.getSheetByName("Flujo prestamos");
+  var sheetFlujo = getSheetFlexible(ss, "FLUJO PRESTAMOS");
   if (!sheetFlujo) return;
   
   var ids = sheetFlujo.getRange("A2:A").getValues();
