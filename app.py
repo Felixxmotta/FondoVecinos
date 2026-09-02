@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import re
 import datetime
 import urllib.parse
+import urllib.request
 import io
 from PIL import Image, ImageDraw, ImageFont
 
@@ -713,10 +714,36 @@ def evaluate_participant_status(person_name, df_ahorros, df_flujo):
         'loan_reasons': loan_reasons
     }
 
+# Helper to flexibly find exact sheet name in Excel workbook (case-insensitive & whitespace tolerant)
+def find_sheet_name(excel_file, target_names):
+    available = excel_file.sheet_names
+    # 1. Exact match case-insensitive
+    for target in target_names:
+        target_clean = target.strip().upper()
+        for s in available:
+            if s.strip().upper() == target_clean:
+                return s
+    # 2. Substring / partial match case-insensitive
+    for target in target_names:
+        target_clean = target.strip().upper()
+        for s in available:
+            s_clean = s.strip().upper()
+            if target_clean in s_clean or s_clean in target_clean:
+                return s
+    raise ValueError(f"No se encontró la pestaña {target_names} en el archivo Excel. Hojas disponibles: {available}")
+
 # Helper function to parse amortization schedules
 @st.cache_data(ttl=30)
-def parse_amortization_tables(url):
-    df = pd.read_excel(url, sheet_name='AMORTIZACIONES', header=None)
+def parse_amortization_tables(url_or_excel):
+    if isinstance(url_or_excel, pd.ExcelFile):
+        excel_file = url_or_excel
+    else:
+        req = urllib.request.Request(url_or_excel, headers={'User-Agent': 'Mozilla/5.0'})
+        content = urllib.request.urlopen(req).read()
+        excel_file = pd.ExcelFile(io.BytesIO(content))
+        
+    sheet_name = find_sheet_name(excel_file, ['AMORTIZACIONES', 'Amortizaciones'])
+    df = excel_file.parse(sheet_name, header=None)
     tables = {}
     loan_idx = 1
     r = 0
@@ -923,8 +950,15 @@ def generate_whatsapp_message(selected_person, user_type_label, user_status_eval
 # Load Data from Google Sheet
 @st.cache_data(ttl=60)
 def load_data(url):
-    df_resumen = pd.read_excel(url, sheet_name='Resumen General')
-    df_ahorros_raw = pd.read_excel(url, sheet_name='Control Ahorros', skiprows=3)
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    content = urllib.request.urlopen(req).read()
+    excel_file = pd.ExcelFile(io.BytesIO(content))
+    
+    resumen_sheet = find_sheet_name(excel_file, ['Resumen General', 'RESUMEN GENERAL'])
+    df_resumen = excel_file.parse(resumen_sheet)
+    
+    ahorros_sheet = find_sheet_name(excel_file, ['Control Ahorros', 'CONTROL AHORRO', 'CONTROL AHORROS'])
+    df_ahorros_raw = excel_file.parse(ahorros_sheet, skiprows=3)
     
     df_ahorros = df_ahorros_raw[
         df_ahorros_raw['Socio'].notna() & 
@@ -935,7 +969,8 @@ def load_data(url):
     df_ahorros['Socio'] = df_ahorros['Socio'].astype(str).str.strip()
     df_ahorros['NormalizedSocio'] = df_ahorros['Socio'].apply(normalize_name)
     
-    df_flujo = pd.read_excel(url, sheet_name='Flujo prestamos')
+    flujo_sheet = find_sheet_name(excel_file, ['Flujo prestamos', 'FLUJO PRESTAMOS', 'FLUJO PRESTAMO'])
+    df_flujo = excel_file.parse(flujo_sheet)
     df_flujo = df_flujo.dropna(subset=['Nombre']).copy()
     df_flujo['Nombre'] = df_flujo['Nombre'].astype(str).str.strip()
     df_flujo['NormalizedNombre'] = df_flujo['Nombre'].apply(normalize_name)
@@ -955,11 +990,12 @@ def load_data(url):
         if 'Estado del credito' in df_flujo.columns:
             df_flujo.loc[saldos_num <= 5.0, 'Estado del credito'] = 'Cancelado'
     
-    # Try reading whatsapp # sheet
+    # Try reading whatsapp sheet
     df_whatsapp = pd.DataFrame()
-    for s_name in ['whatsapp #', 'whatsapp 3', 'whatsapp', 'WhatsApp #']:
+    for s_name in ['whatsapp #', 'whatsapp 3', 'whatsapp', 'WhatsApp #', 'WHATSAPP']:
         try:
-            df_wa = pd.read_excel(url, sheet_name=s_name)
+            matched_wa_sheet = find_sheet_name(excel_file, [s_name])
+            df_wa = excel_file.parse(matched_wa_sheet)
             if 'nombre' in df_wa.columns:
                 df_wa['nombre'] = df_wa['nombre'].astype(str).str.strip()
                 df_wa['NormalizedNombre'] = df_wa['nombre'].apply(normalize_name)
@@ -968,7 +1004,7 @@ def load_data(url):
         except Exception:
             continue
 
-    amort_tables = parse_amortization_tables(url)
+    amort_tables = parse_amortization_tables(excel_file)
     
     return df_resumen, df_ahorros, df_flujo, df_whatsapp, amort_tables
 
