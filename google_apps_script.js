@@ -68,9 +68,7 @@ function registrarNuevo() {
   var sheetAhorros = getSheetFlexible(ss, "CONTROL AHORRO");
   
   if (isSocioNuevo && sheetAhorros) {
-    var lastRowAhorros = sheetAhorros.getLastRow();
-    var idSocio = lastRowAhorros;
-    var newSocioRow = [idSocio, nombre];
+    var newSocioRow = [nombre];
     for (var m = 0; m < 16; m++) newSocioRow.push("");
     sheetAhorros.appendRow(newSocioRow);
   }
