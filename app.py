@@ -733,9 +733,7 @@ def find_sheet_name(excel_file, target_names):
     raise ValueError(f"No se encontró la pestaña {target_names} en el archivo Excel. Hojas disponibles: {available}")
 
 # Helper function to parse amortization schedules
-@st.cache_data(ttl=30)
-# Helper function to parse amortization schedules
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=5)
 def parse_amortization_tables(_url_or_excel):
     if isinstance(_url_or_excel, pd.ExcelFile):
         excel_file = _url_or_excel
@@ -756,6 +754,22 @@ def parse_amortization_tables(_url_or_excel):
         if not header_str: return ""
         s = re.sub(r'[\#\-\d]|(\(CRÉDITO\))|(\(SOCIO\))|(\(CREDITO\))|(\(TERCERO\))|TERCERO|SOCIO|CREDITO|CRÉDITO', '', str(header_str), flags=re.IGNORECASE).strip()
         return normalize_name(s)
+
+    def format_date_label(raw_val, default_label):
+        if isinstance(raw_val, (pd.Timestamp, datetime.datetime)):
+            return raw_val.strftime('%d/%m/%Y')
+        elif not pd.isna(raw_val) and str(raw_val).strip() != '':
+            s_val = str(raw_val).strip()
+            if s_val.endswith('.0'):
+                s_val = s_val[:-2]
+            try:
+                dt_parsed = pd.to_datetime(s_val, errors='coerce')
+                if pd.notna(dt_parsed) and dt_parsed.year > 2000:
+                    return dt_parsed.strftime('%d/%m/%Y')
+            except Exception:
+                pass
+            return s_val
+        return default_label
     
     while r < num_rows:
         val_0 = df.iloc[r, 0]
@@ -784,14 +798,7 @@ def parse_amortization_tables(_url_or_excel):
                 if pd.isna(val_cuota) or val_cuota_str == "" or p_col0_str.startswith("#") or val_cuota_str in ['CUOTA', 'VALOR CUOTA'] or 'NOMBRE:' in p_col0_str:
                     break
                 
-                if isinstance(p_col0, (pd.Timestamp, datetime.datetime)):
-                    label_col0 = p_col0.strftime('%d/%m/%Y')
-                elif not pd.isna(p_col0) and str(p_col0).strip() != '':
-                    label_col0 = str(p_col0).strip()
-                    if label_col0.endswith('.0'):
-                        label_col0 = label_col0[:-2]
-                else:
-                    label_col0 = f"Cuota {cuota_counter}"
+                label_col0 = format_date_label(p_col0, f"Cuota {cuota_counter}")
                 
                 try:
                     v_cuota = float(val_cuota)
@@ -833,12 +840,7 @@ def parse_amortization_tables(_url_or_excel):
                         pass
             
             df_table = pd.DataFrame(payments)
-            init_label = "0 (Inicio)"
-            if isinstance(init_fecha_col0, (pd.Timestamp, datetime.datetime)):
-                init_label = init_fecha_col0.strftime('%d/%m/%Y')
-            elif not pd.isna(init_fecha_col0) and str(init_fecha_col0).strip() != '':
-                init_label = str(init_fecha_col0).strip()
-                if init_label.endswith('.0'): init_label = init_label[:-2]
+            init_label = format_date_label(init_fecha_col0, "0 (Inicio)")
 
             try:
                 init_bal_float = float(init_bal) if not pd.isna(init_bal) else 0.0
@@ -968,7 +970,7 @@ def generate_whatsapp_message(selected_person, user_type_label, user_status_eval
     return msg
 
 # Load Data from Google Sheet
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=5)
 def load_data(url):
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
     content = urllib.request.urlopen(req).read()
@@ -1399,17 +1401,16 @@ if data_loaded:
                     if loan_id is not None and loan_id in amort_tables:
                         matched_table = amort_tables[loan_id]
                     
-                    # 2. Match by normalized name + initial balance matching Monto or Total a Pagar
-                    if matched_table is None and clean_person_name:
-                        if '_all_blocks' in amort_tables:
-                            for t in amort_tables['_all_blocks']:
-                                if t.get('clean_name') == clean_person_name:
-                                    tb_bal = t.get('initial_balance', 0.0)
-                                    if abs(tb_bal - loan_monto) < 500 or abs(tb_bal - loan_total_pagar) < 500:
-                                        matched_table = t
-                                        break
+                    # 2. Match by normalized name + closest balance matching Monto or Total a Pagar
+                    if matched_table is None and clean_person_name and '_all_blocks' in amort_tables:
+                        candidate_blocks = [t for t in amort_tables['_all_blocks'] if t.get('clean_name') == clean_person_name]
+                        if candidate_blocks:
+                            matched_table = min(candidate_blocks, key=lambda t: min(
+                                abs(t.get('initial_balance', 0.0) - loan_monto),
+                                abs(t.get('initial_balance', 0.0) - loan_total_pagar)
+                            ))
                                         
-                    # 3. Match by clean_person_name directly
+                    # 3. Match by clean_person_name directly or by sequential index
                     if matched_table is None and clean_person_name and clean_person_name in amort_tables:
                         matched_table = amort_tables[clean_person_name]
                     elif matched_table is None and loan_person_name in amort_tables:
