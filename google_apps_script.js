@@ -146,7 +146,7 @@ function registrarNuevo() {
       }
       
       var startRowHeader = sheetAmort.getLastRow() + 1;
-      var headerNombre = "# - " + nombre + " (" + tipo.toUpperCase() + ")";
+      var headerNombre = "# " + nextId + " - " + nombre + " (" + tipo.toUpperCase() + ")";
       sheetAmort.appendRow([headerNombre, "CUOTA", "ABONO A K", "INTERESES", "SALDO"]);
       
       var fechaDesembolsoStr = formatDateDDMMYYYY(fechaInicio);

@@ -763,7 +763,7 @@ def parse_amortization_tables(_url_or_excel):
             if s_val.endswith('.0'):
                 s_val = s_val[:-2]
             try:
-                dt_parsed = pd.to_datetime(s_val, errors='coerce')
+                dt_parsed = pd.to_datetime(s_val, errors='coerce', dayfirst=True)
                 if pd.notna(dt_parsed) and dt_parsed.year > 2000:
                     return dt_parsed.strftime('%d/%m/%Y')
             except Exception:
@@ -1399,7 +1399,9 @@ if data_loaded:
                     matched_table = None
                     # 1. Match by explicit ID in block header
                     if loan_id is not None and loan_id in amort_tables:
-                        matched_table = amort_tables[loan_id]
+                        candidate = amort_tables[loan_id]
+                        if candidate.get('extracted_id') == loan_id or not candidate.get('clean_name') or candidate.get('clean_name') == clean_person_name:
+                            matched_table = candidate
                     
                     # 2. Match by normalized name + closest balance matching Monto or Total a Pagar
                     if matched_table is None and clean_person_name and '_all_blocks' in amort_tables:
@@ -1416,7 +1418,9 @@ if data_loaded:
                     elif matched_table is None and loan_person_name in amort_tables:
                         matched_table = amort_tables[loan_person_name]
                     elif matched_table is None and flujo_loan_idx is not None and flujo_loan_idx in amort_tables:
-                        matched_table = amort_tables[flujo_loan_idx]
+                        candidate = amort_tables[flujo_loan_idx]
+                        if not candidate.get('clean_name') or candidate.get('clean_name') == clean_person_name:
+                            matched_table = candidate
                     elif matched_table is None and (idx + 1) in amort_tables and not clean_person_name:
                         matched_table = amort_tables[idx + 1]
                     
