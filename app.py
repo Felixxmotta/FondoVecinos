@@ -914,8 +914,14 @@ def generate_whatsapp_message(selected_person, user_type_label, user_status_eval
     # Calculate general fund metrics
     metrics = parse_fund_metrics(df_resumen)
     tot_ahorros_val = metrics['tot_ahorros_val']
+    int_ganados_val = metrics['int_ganados_val']
+    util_eventos_val = metrics['util_eventos_val']
     fondo_total_val = metrics['fondo_total_val']
     cap_prestado_val = metrics['cap_prestado_val']
+    gastos_op_val = metrics['gastos_op_val']
+    disponible_banco_val = metrics['disponible_banco_val']
+    caja_efectivo_val = metrics['caja_efectivo_val']
+    total_disponible_val = disponible_banco_val + caja_efectivo_val
 
     msg = f"📅 *Fecha:* {today_str}\n"
     msg += f"-----------------------------------------\n"
@@ -961,9 +967,15 @@ def generate_whatsapp_message(selected_person, user_type_label, user_status_eval
             msg += f"    - Estado: {estado}\n"
 
     msg += f"\n📊 *ESTADO GENERAL DEL FONDO:*\n"
+    msg += f"• Total Ahorros Socios: {fmt_money(tot_ahorros_val)}\n"
+    msg += f"• Total Intereses Ganados (cobrados): {fmt_money(int_ganados_val, show_decimals=True)}\n"
+    msg += f"• Utilidad de Eventos/Rifas: {fmt_money(util_eventos_val)}\n"
     msg += f"• Fondo Total Acumulado: {fmt_money(fondo_total_val, show_decimals=True)}\n"
-    msg += f"• Total Ahorro Socios: {fmt_money(tot_ahorros_val)}\n"
-    msg += f"• Capital en Créditos Activos: {fmt_money(cap_prestado_val, show_decimals=True)}\n"
+    msg += f"• Capital Prestado (En calle): {fmt_money(cap_prestado_val, show_decimals=True)}\n"
+    msg += f"• Gastos Operativos: {fmt_money(gastos_op_val)}\n"
+    msg += f"• En Banco: {fmt_money(disponible_banco_val, show_decimals=True)}\n"
+    msg += f"• Caja Efectivo: {fmt_money(caja_efectivo_val)}\n"
+    msg += f"• Total: {fmt_money(total_disponible_val, show_decimals=True)}\n"
 
     msg += f"\n-----------------------------------------\n"
     msg += f"_Fondo de Vecinos - Gestión Transparente_"
