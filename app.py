@@ -584,8 +584,8 @@ def get_column_display_name(col):
         return f"{base_name} 2026"
     return col_str
 
-# Helper to reliably parse metrics from Resumen General sheet (with fallback to df_ahorros)
-def parse_fund_metrics(df_resumen, df_ahorros=None):
+# Helper to reliably parse metrics from Resumen General sheet
+def parse_fund_metrics(df_resumen):
     resumen_dict = {}
     if df_resumen is not None and not df_resumen.empty:
         for r_idx in range(len(df_resumen)):
@@ -593,47 +593,25 @@ def parse_fund_metrics(df_resumen, df_ahorros=None):
             val = df_resumen.iloc[r_idx, 2]
             if pd.notna(val) and concept and concept.lower() not in ["nan", "concepto", "none", ""]:
                 try:
-                    v_num = float(val)
-                    if not np.isnan(v_num):
-                        resumen_dict[concept] = v_num
+                    resumen_dict[concept] = float(val)
                 except (ValueError, TypeError):
                     pass
 
-    def get_resumen_val(keywords, default=None):
+    def get_resumen_val(keywords, default=0.0):
         for k, v in resumen_dict.items():
             k_lower = k.lower().strip()
             if any(kw in k_lower for kw in keywords):
                 return v
         return default
 
-    tot_ahorros_val = get_resumen_val(['ahorro', 'ahorros'], None)
-    
-    # Fallback to df_ahorros if missing/invalid/0.0
-    if (tot_ahorros_val is None or tot_ahorros_val == 0.0) and df_ahorros is not None and not df_ahorros.empty:
-        non_payment_cols = ['Socio', 'Aporte Base', 'NormalizedSocio']
-        payment_cols = [c for c in df_ahorros.columns if c not in non_payment_cols]
-        calc_tot = 0.0
-        for col in payment_cols:
-            s = pd.to_numeric(df_ahorros[col], errors='coerce').fillna(0)
-            calc_tot += s.sum()
-        tot_ahorros_val = calc_tot
-    elif tot_ahorros_val is None:
-        tot_ahorros_val = 0.0
-
-    int_ganados_val = get_resumen_val(['intereses ganados', 'intereses cobrados'], 0.0) or 0.0
-    util_eventos_val = get_resumen_val(['eventos', 'rifas'], 0.0) or 0.0
-    
-    fondo_total_val = get_resumen_val(['fondo total'], None)
-    if fondo_total_val is None or fondo_total_val == 0.0:
-        fondo_total_val = tot_ahorros_val + int_ganados_val + util_eventos_val
-
-    cap_prestado_val = get_resumen_val(['capital prestado', 'en calle'], 0.0) or 0.0
-    gastos_op_val = get_resumen_val(['gastos operativos'], 0.0) or 0.0
-    caja_efectivo_val = get_resumen_val(['caja efectivo', 'caja'], 0.0) or 0.0
-    
-    disponible_banco_val = get_resumen_val(['en banco', 'bancos', 'banco'], None)
-    if disponible_banco_val is None or disponible_banco_val == 0.0:
-        disponible_banco_val = fondo_total_val - cap_prestado_val - gastos_op_val - caja_efectivo_val
+    tot_ahorros_val = get_resumen_val(['ahorro', 'ahorros'], 0.0)
+    int_ganados_val = get_resumen_val(['intereses ganados', 'intereses cobrados'], 0.0)
+    util_eventos_val = get_resumen_val(['eventos', 'rifas'], 0.0)
+    fondo_total_val = get_resumen_val(['fondo total'], tot_ahorros_val + int_ganados_val + util_eventos_val)
+    cap_prestado_val = get_resumen_val(['capital prestado', 'en calle'], 0.0)
+    gastos_op_val = get_resumen_val(['gastos operativos'], 0.0)
+    disponible_banco_val = get_resumen_val(['en banco', 'bancos', 'banco'], 0.0)
+    caja_efectivo_val = get_resumen_val(['caja efectivo', 'caja'], 0.0)
 
     return {
         'tot_ahorros_val': tot_ahorros_val,
@@ -912,7 +890,7 @@ def generate_whatsapp_message(selected_person, user_type_label, user_status_eval
     today_str = datetime.date.today().strftime('%d/%m/%Y')
     
     # Calculate general fund metrics
-    metrics = parse_fund_metrics(df_resumen, df_ahorros)
+    metrics = parse_fund_metrics(df_resumen)
     tot_ahorros_val = metrics['tot_ahorros_val']
     fondo_total_val = metrics['fondo_total_val']
     cap_prestado_val = metrics['cap_prestado_val']
@@ -1468,7 +1446,7 @@ if data_loaded:
         st.markdown("<p style='color: #94a3b8; font-size: 1rem; margin-top: 4px;'>Balance general de capitales, créditos y utilidades acumuladas</p>", unsafe_allow_html=True)
         
         # Parse Fund summary metrics
-        metrics = parse_fund_metrics(df_resumen, df_ahorros)
+        metrics = parse_fund_metrics(df_resumen)
         tot_ahorros_val = metrics['tot_ahorros_val']
         int_ganados_val = metrics['int_ganados_val']
         util_eventos_val = metrics['util_eventos_val']
