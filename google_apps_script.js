@@ -68,8 +68,43 @@ function registrarNuevo() {
   var sheetAhorros = getSheetFlexible(ss, "CONTROL AHORRO");
   
   if (isSocioNuevo && sheetAhorros) {
-    var newSocioRow = [nombre];
-    for (var m = 0; m < 16; m++) newSocioRow.push("");
+    var targetRow = sheetAhorros.getLastRow() + 1;
+    var now = new Date();
+    var currentYear = now.getFullYear();
+    var currentMonth = now.getMonth(); // 0-indexed (8 = September)
+    
+    // Buscar la columna del mes actual en la fila 3 de encabezados
+    var activeColIdx = 20; // Por defecto Columna T (1-indexed 20, Septiembre)
+    try {
+      var headers = sheetAhorros.getRange(3, 1, 1, 37).getValues()[0];
+      for (var col = 2; col < 36; col++) {
+        var hVal = headers[col];
+        if (hVal instanceof Date && !isNaN(hVal.getTime())) {
+          if (hVal.getFullYear() === currentYear && hVal.getMonth() === currentMonth) {
+            activeColIdx = col + 1;
+            break;
+          }
+        }
+      }
+    } catch (err) {}
+    
+    var newSocioRow = [];
+    newSocioRow.push(nombre); // Col A: Socio
+    newSocioRow.push(monto > 0 ? monto : ""); // Col B: Aporte Base
+    
+    // Col C (3) a Col AJ (36): Meses
+    for (var c = 3; c <= 36; c++) {
+      if (c === activeColIdx && monto > 0) {
+        newSocioRow.push(monto);
+      } else {
+        newSocioRow.push("");
+      }
+    }
+    
+    // Col AK (37): Fórmula Total Anual
+    var formulaTotalAnual = "=SUM(C" + targetRow + ":AJ" + targetRow + ")";
+    newSocioRow.push(formulaTotalAnual);
+    
     sheetAhorros.appendRow(newSocioRow);
   }
 
