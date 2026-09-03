@@ -1079,7 +1079,7 @@ if data_loaded:
     st.sidebar.markdown("### 🔗 Accesos:")
     st.sidebar.markdown(f"[📂 Planilla Excel Drive](https://docs.google.com/spreadsheets/d/1ZL5aORQJ7C00YgpMUOfoXyKYtMkB2PRfbKUNrCGQPMc/edit?usp=sharing)")
     
-    st.sidebar.markdown("---")
+    st.sidebar.caption("VERSION: RICARDO_FIX_999")
     if st.sidebar.button("🔄 Actualizar Datos", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
