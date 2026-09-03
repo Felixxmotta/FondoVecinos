@@ -734,6 +734,8 @@ def find_sheet_name(excel_file, target_names):
 
 # Helper function to parse amortization schedules
 @st.cache_data(ttl=30)
+# Helper function to parse amortization schedules
+@st.cache_data(ttl=30)
 def parse_amortization_tables(_url_or_excel):
     if isinstance(_url_or_excel, pd.ExcelFile):
         excel_file = _url_or_excel
@@ -745,9 +747,15 @@ def parse_amortization_tables(_url_or_excel):
     sheet_name = find_sheet_name(excel_file, ['AMORTIZACIONES', 'Amortizaciones'])
     df = excel_file.parse(sheet_name, header=None)
     tables = {}
+    all_blocks = []
     loan_idx = 1
     r = 0
     num_rows = len(df)
+
+    def clean_header_name(header_str):
+        if not header_str: return ""
+        s = re.sub(r'[\#\-\d]|(\(CRÉDITO\))|(\(SOCIO\))|(\(CREDITO\))|(\(TERCERO\))|TERCERO|SOCIO|CREDITO|CRÉDITO', '', str(header_str), flags=re.IGNORECASE).strip()
+        return normalize_name(s)
     
     while r < num_rows:
         val_0 = df.iloc[r, 0]
@@ -757,8 +765,8 @@ def parse_amortization_tables(_url_or_excel):
             init_bal = df.iloc[r_init, 4] if r_init < num_rows else 0.0
             init_fecha_col0 = df.iloc[r_init, 0] if r_init < num_rows else ""
             
-            # Try extracting name or ID from header
-            clean_name = re.sub(r'[\#\-\d]|(\(CRÉDITO\))|(\(SOCIO\))|(\(CREDITO\))', '', val_str, flags=re.IGNORECASE).strip().upper()
+            # Extract clean name or explicit ID from header
+            clean_name = clean_header_name(val_str)
             match_id = re.search(r'#\s*(\d+)', val_str)
             extracted_id = int(match_id.group(1)) if match_id else None
             
@@ -769,7 +777,11 @@ def parse_amortization_tables(_url_or_excel):
                 p_col0 = df.iloc[r_pay, 0]
                 val_cuota = df.iloc[r_pay, 1]
                 
-                if pd.isna(val_cuota) or str(val_cuota).strip() == '':
+                p_col0_str = str(p_col0).strip().upper() if not pd.isna(p_col0) else ""
+                val_cuota_str = str(val_cuota).strip().upper() if not pd.isna(val_cuota) else ""
+                
+                # Stop if blank or encountering a new table header/title row
+                if pd.isna(val_cuota) or val_cuota_str == "" or p_col0_str.startswith("#") or val_cuota_str in ['CUOTA', 'VALOR CUOTA'] or 'NOMBRE:' in p_col0_str:
                     break
                 
                 if isinstance(p_col0, (pd.Timestamp, datetime.datetime)):
@@ -843,22 +855,30 @@ def parse_amortization_tables(_url_or_excel):
             df_table = pd.concat([init_row, df_table], ignore_index=True)
             
             table_entry = {
+                'seq_idx': loan_idx,
+                'extracted_id': extracted_id,
+                'clean_name': clean_name,
                 'initial_balance': init_bal_float,
                 'total_interest_calculated': total_interest,
-                'schedule': df_table
+                'schedule': df_table,
+                'raw_header': val_str
             }
             
-            tables[loan_idx] = table_entry
+            # Store unnamed blocks by sequential index
+            if not clean_name:
+                tables[loan_idx] = table_entry
             if extracted_id is not None:
                 tables[extracted_id] = table_entry
             if clean_name:
                 tables[clean_name] = table_entry
-            
+                
+            all_blocks.append(table_entry)
             loan_idx += 1
             r = r_pay
         else:
             r += 1
             
+    tables['_all_blocks'] = all_blocks
     return tables
 
 # Helper functions for WhatsApp Integration
@@ -1362,7 +1382,9 @@ if data_loaded:
                         loan_id = None
                         
                     loan_person_name = str(loan.get('Nombre', selected_person)).strip().upper()
-                    clean_person_name = re.sub(r'[\#\-\d]|(\(CRÉDITO\))|(\(SOCIO\))|(\(CREDITO\))', '', loan_person_name, flags=re.IGNORECASE).strip().upper()
+                    clean_person_name = normalize_name(loan_person_name)
+                    loan_monto = float(loan.get('Monto', 0)) if pd.notna(loan.get('Monto')) else 0.0
+                    loan_total_pagar = float(loan.get('Total a Pagar', 0)) if pd.notna(loan.get('Total a Pagar')) else 0.0
                     
                     # Compute sequential loan index for this row in df_flujo
                     flujo_loan_idx = None
@@ -1373,15 +1395,28 @@ if data_loaded:
                         flujo_loan_idx = None
 
                     matched_table = None
+                    # 1. Match by explicit ID in block header
                     if loan_id is not None and loan_id in amort_tables:
                         matched_table = amort_tables[loan_id]
-                    elif clean_person_name in amort_tables:
+                    
+                    # 2. Match by normalized name + initial balance matching Monto or Total a Pagar
+                    if matched_table is None and clean_person_name:
+                        if '_all_blocks' in amort_tables:
+                            for t in amort_tables['_all_blocks']:
+                                if t.get('clean_name') == clean_person_name:
+                                    tb_bal = t.get('initial_balance', 0.0)
+                                    if abs(tb_bal - loan_monto) < 500 or abs(tb_bal - loan_total_pagar) < 500:
+                                        matched_table = t
+                                        break
+                                        
+                    # 3. Match by clean_person_name directly
+                    if matched_table is None and clean_person_name and clean_person_name in amort_tables:
                         matched_table = amort_tables[clean_person_name]
-                    elif loan_person_name in amort_tables:
+                    elif matched_table is None and loan_person_name in amort_tables:
                         matched_table = amort_tables[loan_person_name]
-                    elif flujo_loan_idx is not None and flujo_loan_idx in amort_tables:
+                    elif matched_table is None and flujo_loan_idx is not None and flujo_loan_idx in amort_tables:
                         matched_table = amort_tables[flujo_loan_idx]
-                    elif (idx + 1) in amort_tables:
+                    elif matched_table is None and (idx + 1) in amort_tables and not clean_person_name:
                         matched_table = amort_tables[idx + 1]
                     
                     if matched_table:
