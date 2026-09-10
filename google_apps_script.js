@@ -423,21 +423,36 @@ function crearPestanaLiquidador() {
   sheetLiquidador.getRange("D5").setValue("Fecha actual (se actualiza automáticamente)").setFontColor("#64748b").setFontStyle("italic");
   
   // Fila 6: Motivo del Retiro
-  sheetLiquidador.getRange("B6").setValue("Motivo del Retiro:").setFontWeight("bold");
+  var celdaB6 = sheetLiquidador.getRange("B6");
+  celdaB6.setValue("Motivo del Retiro:");
+  celdaB6.setFontWeight("bold");
   sheetLiquidador.getRange("C6").setValue("Retiro voluntario");
-  sheetLiquidador.getRange("D6").setValue("Texto explicativo libre").setFontColor("#64748b").setFontStyle("italic");
+  var celdaD6 = sheetLiquidador.getRange("D6");
+  celdaD6.setValue("Texto explicativo libre");
+  celdaD6.setFontColor("#64748b");
+  celdaD6.setFontStyle("italic");
   
-  // Fila 7: Cantidad de Participantes (Prorrateo Rifas y Eventos)
-  sheetLiquidador.getRange("B7").setValue("Cant. Participantes (Prorrateo Rifas y Eventos):").setFontWeight("bold");
+  // Fila 7: Prorrateo Rifas y Eventos
+  var celdaB7 = sheetLiquidador.getRange("B7");
+  celdaB7.setValue("Cant. Socios Rifas y Eventos:");
+  celdaB7.setFontWeight("bold");
   sheetLiquidador.getRange("C7").setValue(19);
   sheetLiquidador.getRange("C7").setNumberFormat("#,##0");
-  sheetLiquidador.getRange("D7").setValue("Ajustar según socios activos en eventos/rifas").setFontColor("#64748b").setFontStyle("italic");
+  var celdaD7 = sheetLiquidador.getRange("D7");
+  celdaD7.setValue("Ajustar segun socios en rifas");
+  celdaD7.setFontColor("#64748b");
+  celdaD7.setFontStyle("italic");
   
-  // Fila 8: Cantidad de Participantes (Prorrateo Intereses Ganados)
-  sheetLiquidador.getRange("B8").setValue("Cant. Participantes (Prorrateo Intereses Ganados):").setFontWeight("bold");
+  // Fila 8: Prorrateo Intereses Ganados
+  var celdaB8 = sheetLiquidador.getRange("B8");
+  celdaB8.setValue("Cant. Socios Intereses Ganados:");
+  celdaB8.setFontWeight("bold");
   sheetLiquidador.getRange("C8").setValue(19);
   sheetLiquidador.getRange("C8").setNumberFormat("#,##0");
-  sheetLiquidador.getRange("D8").setValue("Ajustar según socios con derecho a intereses").setFontColor("#64748b").setFontStyle("italic");
+  var celdaD8 = sheetLiquidador.getRange("D8");
+  celdaD8.setValue("Ajustar segun socios con intereses");
+  celdaD8.setFontColor("#64748b");
+  celdaD8.setFontStyle("italic");
   
   // Resaltar celdas de entrada del usuario (C4 a C8) en amarillo suave
   sheetLiquidador.getRange("C4:C8").setBackground("#fef9c3");
