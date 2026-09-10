@@ -600,6 +600,7 @@ def normalize_name(name):
     if not name or pd.isna(name):
         return ""
     n = str(name).upper().strip()
+    n = re.sub(r'\[RETIRADO\]|\(RETIRADO\)', '', n, flags=re.IGNORECASE)
     n = re.sub(r'\s*\d+$', '', n)         # Remove trailing digits
     n = re.sub(r'\s+[A-Z]\.?$', '', n)     # Remove trailing single letter
     n = " ".join(n.split())                # Remove extra internal spaces
@@ -655,6 +656,7 @@ def parse_fund_metrics(df_resumen):
     gastos_op_val = get_resumen_val(['gastos operativos'], 0.0)
     disponible_banco_val = get_resumen_val(['en banco', 'bancos', 'banco'], 0.0)
     caja_efectivo_val = get_resumen_val(['caja efectivo', 'caja'], 0.0)
+    liquidaciones_val = get_resumen_val(['liquidaci', 'retiro'], 0.0)
 
     return {
         'tot_ahorros_val': tot_ahorros_val,
@@ -664,7 +666,8 @@ def parse_fund_metrics(df_resumen):
         'cap_prestado_val': cap_prestado_val,
         'gastos_op_val': gastos_op_val,
         'disponible_banco_val': disponible_banco_val,
-        'caja_efectivo_val': caja_efectivo_val
+        'caja_efectivo_val': caja_efectivo_val,
+        'liquidaciones_val': liquidaciones_val
     }
 
 # Helper to evaluate participant activity status (Avisos de inactividad / Mora)
