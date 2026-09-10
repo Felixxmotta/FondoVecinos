@@ -522,5 +522,5 @@ function crearPestanaLiquidador() {
   sheetLiquidador.getRange("C4:C23").setHorizontalAlignment("right");
   sheetLiquidador.getRange("D4:D23").setHorizontalAlignment("left");
   sheetLiquidador.getRange("C4:C6").setHorizontalAlignment("left");
-  SpreadsheetApp.getUi().alert("Pestaña 'LIQUIDADOR' actualizada con éxito. Ahora cuentas con casillas independientes de prorrateo para Rifas (C7) e Intereses (C8).");
+  SpreadsheetApp.getUi().alert("Pestaña LIQUIDADOR actualizada con éxito.");
 }
