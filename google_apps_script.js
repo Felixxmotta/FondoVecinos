@@ -365,6 +365,12 @@ function crearPestanaLiquidador() {
     sheetLiquidador = ss.insertSheet("LIQUIDADOR");
   }
   
+  // Asegurar que la hoja tenga al menos 23 filas
+  var maxRowsLiq = sheetLiquidador.getMaxRows();
+  if (maxRowsLiq < 23) {
+    sheetLiquidador.insertRowsAfter(maxRowsLiq, 23 - maxRowsLiq);
+  }
+  
   // Limpiar contenido previo para reconstruir ordenadamente
   sheetLiquidador.clear();
   
@@ -404,14 +410,14 @@ function crearPestanaLiquidador() {
   // Validación de datos en C4 (Lista desplegable con los socios de CONTROL AHORRO)
   var sheetAhorros = getSheetFlexible(ss, "CONTROL AHORRO");
   if (sheetAhorros) {
-    var lastRowAhorros = Math.max(sheetAhorros.getLastRow(), 25);
-    var rule = SpreadsheetApp.newDataValidation()
-      .requireValueInRange(sheetAhorros.getRange("A5:A" + lastRowAhorros), true)
-      .setAllowInvalid(false)
-      .build();
-    sheetLiquidador.getRange("C4").setDataValidation(rule);
-    
-    // Asignar primer socio por defecto si existe
+    var lastRowAhorros = sheetAhorros.getLastRow();
+    if (lastRowAhorros >= 5) {
+      var rule = SpreadsheetApp.newDataValidation()
+        .requireValueInRange(sheetAhorros.getRange("A5:A" + lastRowAhorros), true)
+        .setAllowInvalid(true)
+        .build();
+      sheetLiquidador.getRange("C4").setDataValidation(rule);
+    }
     var primerSocio = sheetAhorros.getRange("A5").getValue();
     if (primerSocio) sheetLiquidador.getRange("C4").setValue(primerSocio);
   }
@@ -470,17 +476,17 @@ function crearPestanaLiquidador() {
   
   // Fila 11: Total Aportes a la Fecha
   sheetLiquidador.getRange("B11").setValue("Total Aportes a la Fecha (Ahorros):");
-  sheetLiquidador.getRange("C11").setFormula("=IF(C4=\"\", 0, IFERROR(XLOOKUP(C4, 'CONTROL AHORRO'!A5:A, 'CONTROL AHORRO'!AK5:AK, 0), 0))");
+  sheetLiquidador.getRange("C11").setFormula("=IF(ISBLANK(C4), 0, IFERROR(XLOOKUP(C4, 'CONTROL AHORRO'!A5:A, 'CONTROL AHORRO'!AK5:AK, 0), 0))");
   sheetLiquidador.getRange("D11").setValue("Suma de aportes en CONTROL AHORRO (Col AK)").setFontColor("#64748b").setFontStyle("italic");
   
   // Fila 12: Utilidad por Rifas y Eventos (Prorrateado con C7)
   sheetLiquidador.getRange("B12").setValue("Utilidad por Rifas y Eventos:");
-  sheetLiquidador.getRange("C12").setFormula("=IF(OR(C7=\"\", C7=0), 0, 'RESUMEN GENERAL'!C7 / C7)");
+  sheetLiquidador.getRange("C12").setFormula("=IF(OR(ISBLANK(C7), C7=0), 0, 'RESUMEN GENERAL'!C7 / C7)");
   sheetLiquidador.getRange("D12").setValue("RESUMEN GENERAL C7 dividido en participantes de rifas (C7)").setFontColor("#64748b").setFontStyle("italic");
   
   // Fila 13: Intereses Ganados (Cobrados) (Prorrateado con C8)
   sheetLiquidador.getRange("B13").setValue("Intereses Ganados (Cobrados):");
-  sheetLiquidador.getRange("C13").setFormula("=IF(OR(C8=\"\", C8=0), 0, 'RESUMEN GENERAL'!C6 / C8)");
+  sheetLiquidador.getRange("C13").setFormula("=IF(OR(ISBLANK(C8), C8=0), 0, 'RESUMEN GENERAL'!C6 / C8)");
   sheetLiquidador.getRange("D13").setValue("RESUMEN GENERAL C6 dividido en participantes de intereses (C8)").setFontColor("#64748b").setFontStyle("italic");
   
   // Fila 14: Subtotal a Favor
@@ -545,19 +551,6 @@ function crearPestanaLiquidador() {
   sheetLiquidador.getRange("D4:D23").setHorizontalAlignment("left");
   sheetLiquidador.getRange("C4:C6").setHorizontalAlignment("left");
   
-  // Fila 25: Banner / Instrucción de Botón
-  sheetLiquidador.getRange("B25:D25").merge();
-  sheetLiquidador.getRange("B25").setValue("▶️ PARA LIQUIDAR: Seleccione el socio arriba y use el menú: Fondo Vecinos > Procesar Liquidación");
-  sheetLiquidador.getRange("B25:D25")
-    .setBackground("#eff6ff")
-    .setFontColor("#1e40af")
-    .setFontWeight("bold")
-    .setFontSize(10)
-    .setHorizontalAlignment("center")
-    .setVerticalAlignment("middle");
-  sheetLiquidador.setRowHeight(25, 34);
-  sheetLiquidador.getRange("B25:D25").setBorder(true, true, true, true, true, true, "#3b82f6", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-
   // Asegurar también la fila de liquidación en RESUMEN GENERAL y la pestaña de HISTORIAL
   asegurarHistorialLiquidaciones(ss);
   asegurarFilaLiquidacionesEnResumen(ss);
@@ -617,7 +610,8 @@ function asegurarFilaLiquidacionesEnResumen(ss) {
   var sheetResumen = getSheetFlexible(ss, "RESUMEN GENERAL");
   if (!sheetResumen) return null;
   
-  var lastRow = Math.max(sheetResumen.getLastRow(), 20);
+  var lastRow = sheetResumen.getLastRow();
+  if (lastRow < 1) return null;
   var values = sheetResumen.getRange("B1:B" + lastRow).getValues();
   
   var filaCaja = -1;
