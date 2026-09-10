@@ -127,7 +127,9 @@ function registrarNuevo() {
     
     var formulaSaldoPendiente = "=I" + targetRow + "-J" + targetRow;
     var formulaEstadoCredito  = '=IF(ISBLANK(A' + targetRow + '), "", IF(K' + targetRow + '<=5, "Cancelado", "Activo"))';
-    var formulaInteresCobrado = '=IF(ISBLANK(A' + targetRow + '), "", IF(OR(REGEXMATCH(UPPER(L' + targetRow + '), "CANCEL|PAGAD|FINALIZ"), AND(ISNUMBER(K' + targetRow + '), K' + targetRow + '<=5)), H' + targetRow + ', 0))';
+    var condCancel = 'REGEXMATCH(UPPER(L' + targetRow + '), "CANCEL|PAGAD|FINALIZ")';
+    var condSaldoK = 'AND(ISNUMBER(K' + targetRow + '), K' + targetRow + '<=5)';
+    var formulaInteresCobrado = '=IF(ISBLANK(A' + targetRow + '), "", IF(OR(' + condCancel + ', ' + condSaldoK + '), H' + targetRow + ', 0))';
     
     var nuevaFilaFlujo = [
       nextId, nombre, tipo, monto, tasaDecimal, plazo,
@@ -268,7 +270,9 @@ function repararTodasLasFormulas() {
     var r = i + 2;
     formulasK.push(["=I" + r + "-J" + r]);
     formulasL.push(['=IF(ISBLANK(A' + r + '), "", IF(K' + r + '<=5, "Cancelado", "Activo"))']);
-    var formulaM = '=IF(ISBLANK(A' + r + '), "", IF(OR(REGEXMATCH(UPPER(L' + r + '), "CANCEL|PAGAD|FINALIZ"), AND(ISNUMBER(K' + r + '), K' + r + '<=5)), H' + r + ', 0))';
+    var condCancel = 'REGEXMATCH(UPPER(L' + r + '), "CANCEL|PAGAD|FINALIZ")';
+    var condSaldoK = 'AND(ISNUMBER(K' + r + '), K' + r + '<=5)';
+    var formulaM = '=IF(ISBLANK(A' + r + '), "", IF(OR(' + condCancel + ', ' + condSaldoK + '), H' + r + ', 0))';
     formulasM.push([formulaM]);
   }
   
