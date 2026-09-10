@@ -531,6 +531,49 @@ st.markdown("""
             padding: 14px 10px;
         }
     }
+
+    /* Direct WhatsApp Button in Dispatch Board */
+    .btn-wa-direct {
+        display: block;
+        text-align: center;
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: white !important;
+        padding: 9px 16px;
+        border-radius: 8px;
+        font-weight: 700;
+        text-decoration: none !important;
+        font-size: 0.92rem;
+        box-shadow: 0 2px 10px rgba(16, 185, 129, 0.35);
+        transition: all 0.2s ease;
+    }
+    .btn-wa-direct:hover {
+        background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        box-shadow: 0 4px 14px rgba(16, 185, 129, 0.5);
+        color: white !important;
+    }
+    .btn-wa-secondary {
+        display: block;
+        text-align: center;
+        background: #475569;
+        color: white !important;
+        padding: 9px 16px;
+        border-radius: 8px;
+        font-weight: 700;
+        text-decoration: none !important;
+        font-size: 0.92rem;
+        transition: all 0.2s ease;
+    }
+    .btn-wa-secondary:hover {
+        background: #334155;
+        color: white !important;
+    }
+    .dispatch-item-card {
+        background: rgba(30, 41, 59, 0.65);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        border-radius: 12px;
+        padding: 14px 18px;
+        margin-bottom: 12px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -981,6 +1024,61 @@ def generate_whatsapp_message(selected_person, user_type_label, user_status_eval
     msg += f"_Fondo de Vecinos - Gestión Transparente_"
     return msg
 
+def compute_person_financials(person_name, df_ahorros, df_flujo, df_whatsapp, socios_list, df_resumen):
+    norm_selected = normalize_name(person_name)
+    user_loans = df_flujo[df_flujo['NormalizedNombre'] == norm_selected].to_dict('records')
+    total_loan_balance = sum(loan['Saldo Pendiente'] for loan in user_loans if not pd.isna(loan['Saldo Pendiente']))
+    active_loans_count = sum(1 for loan in user_loans if 'ACTIVO' in str(loan.get('Estado del credito', loan.get('Estado', ''))).upper())
+    
+    socio_savings_df = df_ahorros[df_ahorros['NormalizedSocio'] == norm_selected]
+    has_savings = len(socio_savings_df) > 0
+    is_socio = (person_name in socios_list) or any(l.get('Tipo') == 'socio' for l in user_loans)
+    user_type_label = "SOCIO DEL FONDO" if is_socio else "PARTICULAR / TERCERO"
+    user_badge_class = "badge-socio" if is_socio else "badge-tercero"
+    
+    total_savings = 0
+    base_savings = 0
+    if is_socio and has_savings:
+        socio_savings_row = socio_savings_df.iloc[0]
+        total_savings = socio_savings_row['Total Anual'] if not pd.isna(socio_savings_row['Total Anual']) else 0
+        base_savings = socio_savings_row['Aporte Base'] if not pd.isna(socio_savings_row['Aporte Base']) else 0
+        
+    user_status_eval = evaluate_participant_status(person_name, df_ahorros, df_flujo)
+    phone_num = get_phone_for_person(person_name, df_whatsapp)
+    
+    wa_msg = generate_whatsapp_message(
+        person_name, user_type_label, user_status_eval,
+        total_savings, base_savings, active_loans_count, total_loan_balance,
+        user_loans, df_resumen, df_ahorros, df_flujo
+    )
+    encoded_wa_msg = urllib.parse.quote(wa_msg)
+    if phone_num:
+        wa_url = f"https://api.whatsapp.com/send?phone={phone_num}&text={encoded_wa_msg}"
+        btn_wa_label = f"📲 Enviar Resumen a {person_name} (+{phone_num})"
+    else:
+        wa_url = f"https://api.whatsapp.com/send?text={encoded_wa_msg}"
+        btn_wa_label = f"📲 Enviar Resumen por WhatsApp (Elegir Contacto)"
+        
+    return {
+        'person_name': person_name,
+        'norm_selected': norm_selected,
+        'is_socio': is_socio,
+        'user_type_label': user_type_label,
+        'user_badge_class': user_badge_class,
+        'user_status_eval': user_status_eval,
+        'total_savings': total_savings,
+        'base_savings': base_savings,
+        'has_savings': has_savings,
+        'user_loans': user_loans,
+        'active_loans_count': active_loans_count,
+        'total_loan_balance': total_loan_balance,
+        'phone_num': phone_num,
+        'wa_msg': wa_msg,
+        'encoded_wa_msg': encoded_wa_msg,
+        'wa_url': wa_url,
+        'btn_wa_label': btn_wa_label
+    }
+
 # Load Data from Google Sheet
 @st.cache_data(ttl=5)
 def load_data(url):
@@ -1042,80 +1140,401 @@ def load_data(url):
     
     return df_resumen, df_ahorros, df_flujo, df_whatsapp, amort_tables
 
-# Run data loading
-try:
-    df_resumen, df_ahorros, df_flujo, df_whatsapp, amort_tables = load_data(SHEET_URL)
-    data_loaded = True
-except Exception as e:
-    st.error(f"Error al cargar los datos de Google Sheets: {e}")
-    data_loaded = False
+def render_fund_general_view(df_resumen, df_ahorros, df_flujo, full_people_list):
+    st.markdown("<h2 style='margin-bottom: 0px;'>📊 Estado Consolidado del Fondo de Vecinos</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #94a3b8; font-size: 1rem; margin-top: 4px;'>Balance general de capitales, créditos y utilidades acumuladas</p>", unsafe_allow_html=True)
+    
+    # Parse Fund summary metrics
+    metrics = parse_fund_metrics(df_resumen)
+    tot_ahorros_val = metrics['tot_ahorros_val']
+    int_ganados_val = metrics['int_ganados_val']
+    util_eventos_val = metrics['util_eventos_val']
+    fondo_total_val = metrics['fondo_total_val']
+    cap_prestado_val = metrics['cap_prestado_val']
+    gastos_op_val = metrics['gastos_op_val']
+    disponible_banco_val = metrics['disponible_banco_val']
+    caja_efectivo_val = metrics['caja_efectivo_val']
+    active_loans_mask = df_flujo['Estado del credito'].astype(str).str.upper().str.contains('ACTIVO') if 'Estado del credito' in df_flujo.columns else df_flujo['Estado'].astype(str).str.upper().str.contains('ACTIVO')
 
-if data_loaded:
-    socios_list = [str(s).strip() for s in df_ahorros['Socio'].dropna() if str(s).strip()]
-    flujo_names = [str(n).strip() for n in df_flujo['Nombre'].dropna() if str(n).strip()]
+    # Main Fund Metric Cards
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+    with col_f1:
+        st.markdown(f"""
+        <div class='summary-card summary-card-purple'>
+            <span class='card-icon'>🏛️</span>
+            <div class='card-label'>Fondo Total Acumulado</div>
+            <div class='card-value val-purple'>{fmt_money(fondo_total_val, show_decimals=True)}</div>
+            <p class='card-subtext'>Patrimonio global del fondo</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_f2:
+        st.markdown(f"""
+        <div class='summary-card summary-card-green'>
+            <span class='card-icon'>🏦</span>
+            <div class='card-label'>Total Ahorros Socios</div>
+            <div class='card-value val-green'>{fmt_money(tot_ahorros_val)}</div>
+            <p class='card-subtext'>Capital aportado por socios</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_f3:
+        st.markdown(f"""
+        <div class='summary-card summary-card-red'>
+            <span class='card-icon'>📢</span>
+            <div class='card-label'>Capital Prestado</div>
+            <div class='card-value val-red'>{fmt_money(cap_prestado_val, show_decimals=True)}</div>
+            <p class='card-subtext'>Dinero en créditos activos</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_f4:
+        st.markdown(f"""
+        <div class='summary-card summary-card-blue'>
+            <span class='card-icon'>💵</span>
+            <div class='card-label'>Disponible en Banco</div>
+            <div class='card-value val-blue'>{fmt_money(disponible_banco_val, show_decimals=True)}</div>
+            <p class='card-subtext'>Liquidez en cuenta bancaria</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Secondary Fund Cards
+    col_f5, col_f6, col_f7, col_f8 = st.columns(4)
+    with col_f5:
+        st.markdown(f"""
+        <div class='summary-card'>
+            <span class='card-icon'>📈</span>
+            <div class='card-label'>Intereses Cobrados</div>
+            <div class='card-value val-green'>{fmt_money(int_ganados_val, show_decimals=True)}</div>
+            <p class='card-subtext'>Ganancias reales cobradas</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_f6:
+        st.markdown(f"""
+        <div class='summary-card'>
+            <span class='card-icon'>🎟️</span>
+            <div class='card-label'>Utilidad Eventos / Rifas</div>
+            <div class='card-value val-blue'>{fmt_money(util_eventos_val, show_decimals=True)}</div>
+            <p class='card-subtext'>Ingresos extraordinarios</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_f7:
+        st.markdown(f"""
+        <div class='summary-card'>
+            <span class='card-icon'>💼</span>
+            <div class='card-label'>Caja Efectivo</div>
+            <div class='card-value val-gray'>{fmt_money(caja_efectivo_val, show_decimals=True)}</div>
+            <p class='card-subtext'>Dinero físico en caja</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_f8:
+        st.markdown(f"""
+        <div class='summary-card summary-card-red'>
+            <span class='card-icon'>🧾</span>
+            <div class='card-label'>Gastos Operativos</div>
+            <div class='card-value val-red'>{fmt_money(gastos_op_val, show_decimals=True)}</div>
+            <p class='card-subtext'>Egresos y costos del fondo</p>
+        </div>
+        """, unsafe_allow_html=True)
     
-    seen_names = set()
-    full_people_list = []
-    for name in socios_list + flujo_names:
-        norm = normalize_name(name)
-        if norm not in seen_names and name != "":
-            full_people_list.append(name)
-            seen_names.add(norm)
-    full_people_list = sorted(full_people_list)
-    
-    # Sidebar Logo & Branding
-    sb_col1, sb_col2, sb_col3 = st.sidebar.columns([1, 3, 1])
-    with sb_col2:
-        st.image("logo.png", use_container_width=True)
-    st.sidebar.markdown("---")
-    
-    st.sidebar.markdown("### 👤 Seleccionar Persona:")
-    selected_person = st.sidebar.selectbox(
-        label="Persona",
-        options=full_people_list,
-        label_visibility="collapsed"
+    # 1-Click Download Button for Ficha 2 PNG Image
+    card2_buf = generate_fund_card_png(
+        fondo_total_val, tot_ahorros_val, cap_prestado_val, disponible_banco_val,
+        int_ganados_val, util_eventos_val, caja_efectivo_val, gastos_op_val
+    )
+    st.download_button(
+        label="📥 Descargar Ficha 2 - Estado General del Fondo (Imagen PNG)",
+        data=card2_buf,
+        file_name="Ficha2_Estado_General_Fondo.png",
+        mime="image/png",
+        use_container_width=True
     )
     
+    st.markdown("---")
+
+    # Visual layout for Fund assets and overview
+    col_pie, col_details = st.columns([1, 1])
+    
+    with col_pie:
+        assets = ['📢 Capital Prestado', '💵 Disponible en Banco', '🧾 Gastos Operativos', '💼 Caja efectivo']
+        asset_values = [cap_prestado_val, disponible_banco_val, gastos_op_val, caja_efectivo_val]
+        
+        fig_pie = go.Figure(data=[go.Pie(
+            labels=assets,
+            values=asset_values,
+            hole=0.55,
+            marker=dict(
+                colors=['#f43f5e', '#3b82f6', '#ef4444', '#94a3b8'],
+                line=dict(color='#1e293b', width=2)
+            ),
+            textinfo='percent',
+            textposition='auto',
+            hovertemplate="<b>%{label}</b><br>Monto: $ %{value:,.2f}<br>Porcentaje: %{percent}<extra></extra>",
+            textfont=dict(size=13, color='#f8fafc')
+        )])
+        fig_pie.update_layout(
+            title=dict(
+                text="<b>🏛️ Distribución del Patrimonio del Fondo</b>",
+                font=dict(size=17, color='#f8fafc'),
+                x=0.5,
+                xanchor='center'
+            ),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font_color='#cbd5e1',
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.22,
+                xanchor="center",
+                x=0.5,
+                font=dict(color="#cbd5e1", size=12)
+            ),
+            margin=dict(l=20, r=20, t=50, b=120),
+            annotations=[dict(
+                text=f"<b>FONDO TOTAL<br>{fmt_money(fondo_total_val)}</b>",
+                x=0.5, y=0.5,
+                font=dict(size=13, color="#38bdf8"),
+                showarrow=False
+            )]
+        )
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+    with col_details:
+        st.markdown("### 📋 Resumen del Balance General")
+        balance_items = [
+            {'Concepto': 'Total Ahorros Socios', 'Valor ($)': fmt_money(tot_ahorros_val, show_decimals=True)},
+            {'Concepto': 'Intereses Ganados (Cobrados)', 'Valor ($)': fmt_money(int_ganados_val, show_decimals=True)},
+            {'Concepto': 'Utilidad Eventos/Rifas', 'Valor ($)': fmt_money(util_eventos_val, show_decimals=True)},
+            {'Concepto': 'Fondo Total Acumulado', 'Valor ($)': fmt_money(fondo_total_val, show_decimals=True)},
+            {'Concepto': 'Capital Prestado (En calle)', 'Valor ($)': fmt_money(cap_prestado_val, show_decimals=True)},
+            {'Concepto': 'Disponible en Banco', 'Valor ($)': fmt_money(disponible_banco_val, show_decimals=True)},
+            {'Concepto': 'Gastos Operativos', 'Valor ($)': fmt_money(gastos_op_val, show_decimals=True)},
+            {'Concepto': 'Caja Efectivo', 'Valor ($)': fmt_money(caja_efectivo_val, show_decimals=True)}
+        ]
+        st.dataframe(pd.DataFrame(balance_items), hide_index=True, use_container_width=True)
+        
+        total_active_loans_amt = cap_prestado_val
+        total_active_loans_count = len(df_flujo[active_loans_mask])
+        
+        # Global Activity Summary
+        all_evals = [evaluate_participant_status(p, df_ahorros, df_flujo) for p in full_people_list]
+        count_aldia = sum(1 for e in all_evals if e['overall_status'] == 'AL_DIA')
+        count_inactivo = sum(1 for e in all_evals if e['overall_status'] == 'INACTIVO')
+        count_retirado = sum(1 for e in all_evals if e['overall_status'] == 'RETIRADO')
+        
+        st.markdown(f"""
+        <div class='alert-card' style='margin-top: 15px;'>
+            💼 <b>Préstamos activos totales:</b> {total_active_loans_count}<br>
+            💵 <b>Monto en préstamos en la calle:</b> {fmt_money(total_active_loans_amt, show_decimals=True)}<br>
+            👥 <b>Estatus Participantes:</b> <span style='color: #34d399;'>{count_aldia} Al día</span> | <span style='color: #fb7185;'>{count_inactivo} Inactivos / Mora</span> | <span style='color: #94a3b8;'>{count_retirado} Retirados</span>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.expander("🚨 Ver Lista de Participantes Inactivos / En Mora", expanded=False):
+            inactivos_list = []
+            for p, ev in zip(full_people_list, all_evals):
+                if ev['overall_status'] == 'INACTIVO':
+                    reasons = " | ".join(ev['ahorro_reasons'] + ev['loan_reasons'])
+                    inactivos_list.append({
+                        'Participante': p,
+                        'Detalle Novedad': reasons.replace('<b>', '').replace('</b>', '')
+                    })
+            if inactivos_list:
+                st.dataframe(pd.DataFrame(inactivos_list), hide_index=True, use_container_width=True)
+            else:
+                st.success("🎉 ¡No hay participantes inactivos!")
+
+def render_home_page(df_resumen, df_ahorros, df_flujo, df_whatsapp, full_people_list, socios_list):
+    today_str = datetime.date.today().strftime('%d/%m/%Y')
+    
+    # 1. Hero Welcome Banner
+    st.markdown(f"""
+    <div style='background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%); border: 1.5px solid #3b82f6; border-radius: 16px; padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);'>
+        <div style='display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;'>
+            <div>
+                <span style='background: #3b82f6; color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase;'>FONDO DE VECINOS LA MESA 2026</span>
+                <h1 style='color: white; margin: 8px 0 4px 0; font-size: 2.1rem; font-weight: 800;'>🏛️ Panel Central y Estado del Fondo</h1>
+                <p style='color: #94a3b8; font-size: 1.02rem; margin: 0;'>Bienvenido al sistema de administración, control financiero y notificaciones a socios.</p>
+            </div>
+            <div style='text-align: right; background: rgba(255,255,255,0.06); padding: 10px 18px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);'>
+                <div style='color: #60a5fa; font-size: 0.82rem; font-weight: 600;'>📅 FECHA DE CORTE</div>
+                <div style='color: white; font-size: 1.15rem; font-weight: 700;'>{today_str}</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    home_tab_dispatch, home_tab_fund = st.tabs([
+        "💬 BANDEJA DE DESPACHO MASIVO WHATSAPP", 
+        "📊 BALANCE CONSOLIDADO Y MÉTRICAS"
+    ])
+    
+    with home_tab_dispatch:
+        st.markdown("### 💬 Bandeja de Despacho Masivo por WhatsApp")
+        st.markdown("""
+        <p style='color: #94a3b8; font-size: 0.95rem; margin-top: -6px; margin-bottom: 16px;'>
+            Envía el estado de cuenta y resumen oficial a cada participante con <b>1 solo clic</b> por socio, directo desde esta pantalla y sin tener que buscar a cada persona en el menú.
+        </p>
+        """, unsafe_allow_html=True)
+        
+        # Precompute all participants data
+        all_participants_data = [
+            compute_person_financials(p, df_ahorros, df_flujo, df_whatsapp, socios_list, df_resumen)
+            for p in full_people_list
+        ]
+        
+        total_count = len(all_participants_data)
+        with_phone_count = sum(1 for d in all_participants_data if d['phone_num'])
+        without_phone_count = total_count - with_phone_count
+        active_credits_count = sum(1 for d in all_participants_data if d['active_loans_count'] > 0)
+        
+        # Stats summary row
+        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+        with col_s1:
+            st.metric("Total Participantes", total_count)
+        with col_s2:
+            st.metric("Con WhatsApp Registrado", with_phone_count)
+        with col_s3:
+            st.metric("Sin Teléfono", without_phone_count)
+        with col_s4:
+            st.metric("Con Créditos Activos", active_credits_count)
+            
+        st.markdown("---")
+        
+        # Search & Filter
+        f_col1, f_col2 = st.columns([2, 1])
+        with f_col1:
+            search_query = st.text_input("🔍 Buscar participante:", placeholder="Escribe el nombre...", key="home_wa_search")
+        with f_col2:
+            filter_cat = st.selectbox(
+                "Filtrar:",
+                ["Todos los participantes", "Solo Socios Ahorradores", "Con Crédito Activo", "Con Novedad / En Mora", "Con WhatsApp Registrado", "Sin WhatsApp"],
+                key="home_wa_filter"
+            )
+            
+        # Filter logic
+        filtered_data = all_participants_data
+        if search_query:
+            q = normalize_name(search_query)
+            filtered_data = [d for d in filtered_data if q in d['norm_selected']]
+            
+        if filter_cat == "Solo Socios Ahorradores":
+            filtered_data = [d for d in filtered_data if d['is_socio']]
+        elif filter_cat == "Con Crédito Activo":
+            filtered_data = [d for d in filtered_data if d['active_loans_count'] > 0]
+        elif filter_cat == "Con Novedad / En Mora":
+            filtered_data = [d for d in filtered_data if d['user_status_eval']['overall_status'] == 'INACTIVO']
+        elif filter_cat == "Con WhatsApp Registrado":
+            filtered_data = [d for d in filtered_data if d['phone_num']]
+        elif filter_cat == "Sin WhatsApp":
+            filtered_data = [d for d in filtered_data if not d['phone_num']]
+            
+        st.markdown(f"**Mostrando {len(filtered_data)} de {total_count} participantes:**")
+        
+        # Render dispatch items
+        for i, d in enumerate(filtered_data):
+            p_name = d['person_name']
+            phone = d['phone_num']
+            status_eval = d['user_status_eval']
+            status_badge = status_eval['overall_badge']
+            user_type_label = d['user_type_label']
+            user_badge_class = d['user_badge_class']
+            
+            card_html = f"""
+            <div class='dispatch-item-card'>
+                <div style='display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;'>
+                    <div style='min-width: 240px;'>
+                        <div style='font-size: 1.12rem; font-weight: 700; color: #f8fafc;'>
+                            👤 {p_name}
+                        </div>
+                        <div style='margin-top: 5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;'>
+                            <span class='{user_badge_class}' style='font-size: 0.72rem; padding: 2px 8px;'>{user_type_label}</span>
+                            {status_badge}
+                            <span style='color: #94a3b8; font-size: 0.85rem;'>
+                                {'📱 <b>+' + phone + '</b>' if phone else '⚠️ <span style=\"color: #f59e0b;\">Sin número registrado</span>'}
+                            </span>
+                        </div>
+                    </div>
+                    <div style='font-size: 0.9rem; color: #cbd5e1; text-align: right;'>
+                        <div>Ahorros: <b style='color: #34d399;'>{fmt_money(d['total_savings'])}</b></div>
+                        <div>Deuda: <b style='color: #f87171;'>{fmt_money(d['total_loan_balance'], show_decimals=True)}</b> ({d['active_loans_count']} créd.)</div>
+                    </div>
+                </div>
+            </div>
+            """
+            st.markdown(card_html, unsafe_allow_html=True)
+            
+            row_col1, row_col2, row_col3 = st.columns([2, 1, 1])
+            with row_col1:
+                first_name = p_name.split()[0]
+                if phone:
+                    btn_html = f"""
+                    <a href="{d['wa_url']}" target="_blank" class="btn-wa-direct">
+                        📲 Enviar WhatsApp a {first_name} (+{phone})
+                    </a>
+                    """
+                else:
+                    btn_html = f"""
+                    <a href="{d['wa_url']}" target="_blank" class="btn-wa-secondary">
+                        📲 Enviar WhatsApp (Elegir Contacto)
+                    </a>
+                    """
+                st.markdown(btn_html, unsafe_allow_html=True)
+                
+            with row_col2:
+                with st.expander("👁️ Ver Mensaje"):
+                    st.text_area("Texto listo:", d['wa_msg'], height=130, key=f"prev_msg_{d['norm_selected']}")
+                    
+            with row_col3:
+                if st.button("🔍 Ver Ficha", key=f"go_btn_{d['norm_selected']}", use_container_width=True):
+                    st.session_state['nav_mode'] = "👤 Consulta Individual"
+                    st.session_state['selected_person_select'] = p_name
+                    st.rerun()
+                    
+            st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
+            
+        with st.expander("📋 Ver y Copiar Todos los Mensajes de una Sola Vez (Lista Completa)", expanded=False):
+            all_text_concat = "\n\n=========================================\n\n".join([
+                f"👤 DESTINATARIO: {d['person_name']} (Tel: {d['phone_num'] or 'No registrado'})\n\n{d['wa_msg']}"
+                for d in filtered_data
+            ])
+            st.text_area("Todos los mensajes formateados:", all_text_concat, height=300)
+            
+    with home_tab_fund:
+        render_fund_general_view(df_resumen, df_ahorros, df_flujo, full_people_list)
+
+def render_individual_page(selected_person, df_resumen, df_ahorros, df_flujo, df_whatsapp, amort_tables, full_people_list, socios_list):
     norm_selected = normalize_name(selected_person)
-    user_loans_for_type = df_flujo[df_flujo['NormalizedNombre'] == norm_selected].to_dict('records')
-    is_socio = (selected_person in socios_list) or any(l['Tipo'] == 'socio' for l in user_loans_for_type)
+    user_loans_for_type = df_flujo[df_flujo["NormalizedNombre"] == norm_selected].to_dict("records")
+    is_socio = (selected_person in socios_list) or any(l.get("Tipo") == "socio" for l in user_loans_for_type)
     user_type_label = "SOCIO DEL FONDO" if is_socio else "PARTICULAR / TERCERO"
     user_badge_class = "badge-socio" if is_socio else "badge-tercero"
-    
-    # Evaluate activity status
     user_status_eval = evaluate_participant_status(selected_person, df_ahorros, df_flujo)
-    
-    st.sidebar.markdown(f"<div style='text-align: center; margin-top: 10px; display: flex; flex-direction: column; gap: 6px; align-items: center;'><span class='{user_badge_class}'>{user_type_label}</span>{user_status_eval['overall_badge']}</div>", unsafe_allow_html=True)
-    st.sidebar.markdown("---")
-    
-    st.sidebar.markdown("### 🔗 Accesos:")
-    st.sidebar.markdown(f"[📂 Planilla Excel Drive](https://docs.google.com/spreadsheets/d/1ZL5aORQJ7C00YgpMUOfoXyKYtMkB2PRfbKUNrCGQPMc/edit?usp=sharing)")
-    
-    st.sidebar.markdown("---")
-    if st.sidebar.button("🔄 Actualizar Datos", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
-        
     # Main Header
     st.markdown(f"<h1 style='margin-bottom: 0px;'>💰 Estado de Cuenta: {selected_person}</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='color: #94a3b8; font-size: 1.05rem; margin-top: 4px; margin-bottom: 20px;'>Resumen financiero individual y del Fondo de Vecinos</p>", unsafe_allow_html=True)
-    
+
     # Main Tabs: Individual Analysis & Fund Status
     tab_individual, tab_fund = st.tabs(["👤 ANÁLISIS INDIVIDUAL", "📊 ESTADO GENERAL DEL FONDO"])
-    
+
     # ==========================================
     # --- TAB 1: INDIVIDUAL ANALYSIS ---
     # ==========================================
     with tab_individual:
         norm_selected = normalize_name(selected_person)
         user_loans = df_flujo[df_flujo['NormalizedNombre'] == norm_selected].to_dict('records')
-        
+
         total_loan_balance = sum(loan['Saldo Pendiente'] for loan in user_loans if not pd.isna(loan['Saldo Pendiente']))
         active_loans_count = sum(1 for loan in user_loans if 'ACTIVO' in str(loan.get('Estado', '')).upper())
-        
+
         socio_savings_df = df_ahorros[df_ahorros['NormalizedSocio'] == norm_selected]
         has_savings = len(socio_savings_df) > 0
-        
+
         total_savings = 0
         base_savings = 0
         if is_socio and has_savings:
@@ -1149,14 +1568,14 @@ if data_loaded:
             </div>
         </div>
         """, unsafe_allow_html=True)
-        
+
         wa_tab_text, wa_tab_img = st.tabs(["📝 Opción 1: Enviar como Texto", "📸 Opción 2: Enviar Pantallazo (Imágenes)"])
-        
+
         with wa_tab_text:
             st.link_button(btn_wa_label, wa_url, use_container_width=True)
             with st.expander("👁️ Ver texto sin encabezado ni link (Listo para enviar)"):
                 st.code(wa_msg, language="markdown")
-                
+
         with wa_tab_img:
             # Generate 1-click downloadable PNG card image
             card1_buf = generate_individual_card_png(
@@ -1165,7 +1584,7 @@ if data_loaded:
             )
             safe_person_filename = re.sub(r'[^a-zA-Z0-9]', '_', selected_person)
             file_name_1 = f"Ficha1_Resumen_{safe_person_filename}.png"
-            
+
             st.download_button(
                 label=f"📥 1. Descargar Imagen de la Ficha en PNG ({selected_person})",
                 data=card1_buf,
@@ -1173,14 +1592,14 @@ if data_loaded:
                 mime="image/png",
                 use_container_width=True
             )
-            
+
             if phone_num:
                 wa_img_url = f"https://api.whatsapp.com/send?phone={phone_num}"
                 btn_wa_img_label = f"📲 2. Abrir Chat de WhatsApp con {selected_person} (+{phone_num})"
             else:
                 wa_img_url = "https://api.whatsapp.com/send"
                 btn_wa_img_label = "📲 2. Abrir WhatsApp (Elegir Contacto)"
-                
+
             st.markdown("""
             <div style='background: rgba(30, 41, 59, 0.7); border-left: 4px solid #3b82f6; border-radius: 8px; padding: 12px 16px; margin-top: 10px; margin-bottom: 12px; font-size: 0.88rem; color: #e2e8f0;'>
                 <b>💡 Pasos para enviar la Ficha en Imagen con 1 Clic:</b><br/>
@@ -1190,7 +1609,7 @@ if data_loaded:
             </div>
             """, unsafe_allow_html=True)
             st.link_button(btn_wa_img_label, wa_img_url, use_container_width=True)
-        
+
         st.markdown("<div style='margin-bottom: 15px;'></div>", unsafe_allow_html=True)
 
         # --- AVISO DE INACTIVIDAD / AL DÍA BANNER ---
@@ -1200,7 +1619,7 @@ if data_loaded:
                 reasons_li += f"<li style='margin-bottom: 4px;'><b>Ahorro de Socios:</b> {r}</li>"
             for r in user_status_eval['loan_reasons']:
                 reasons_li += f"<li style='margin-bottom: 4px;'><b>Cuotas de Crédito:</b> {r}</li>"
-                
+
             st.markdown(f"""
             <div class='alert-card-danger'>
                 <div style='font-size: 1.15rem; font-weight: 800; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;'>
@@ -1232,7 +1651,7 @@ if data_loaded:
 
         # 4 Core KPI Cards Grid (Clear, big fonts, intuitive for adults)
         c1, c2, c3, c4 = st.columns(4)
-        
+
         with c1:
             val_savings_str = fmt_money(total_savings) if (is_socio and has_savings) else "N/A"
             val_class = "val-green" if (is_socio and has_savings) else "val-gray"
@@ -1244,7 +1663,7 @@ if data_loaded:
                 <p class='card-subtext'>Ahorro total acumulado</p>
             </div>
             """, unsafe_allow_html=True)
-            
+
         with c2:
             val_base_str = fmt_money(base_savings) if (is_socio and has_savings) else "N/A"
             val_class_b = "val-blue" if (is_socio and has_savings) else "val-gray"
@@ -1282,11 +1701,11 @@ if data_loaded:
         # --- SAVINGS BREAKDOWN (Clear tabular view without graph, clean for mobile) ---
         if is_socio and has_savings:
             st.markdown("<div class='section-title'>📁 Historial de Ahorros Mensuales</div>", unsafe_allow_html=True)
-            
+
             socio_savings_row = socio_savings_df.iloc[0]
             ignore_cols = ['Socio', 'Aporte Base', 'Total Anual', 'NormalizedSocio']
             months_cols = [c for c in df_ahorros.columns if c not in ignore_cols and not str(c).startswith('Unnamed:')]
-            
+
             savings_records = []
             for col_name in months_cols:
                 val = socio_savings_row.get(col_name, 0) if col_name in socio_savings_row else 0
@@ -1296,7 +1715,7 @@ if data_loaded:
                         val_num = float(val)
                     except (ValueError, TypeError):
                         val_num = 0.0
-                
+
                 label = get_column_display_name(col_name)
                 if val_num > 0:
                     savings_records.append({
@@ -1310,7 +1729,7 @@ if data_loaded:
                         'Monto Ahorrado': fmt_money(val_num),
                         'Estado': '⚪ Pendiente'
                     })
-            
+
             if not savings_records:
                 for col_name in months_cols[:12]:
                     savings_records.append({
@@ -1320,7 +1739,7 @@ if data_loaded:
                     })
 
             df_savings_view = pd.DataFrame(savings_records)
-            
+
             with st.expander("🔍 Ver Detalle Mensual de Ahorros completos", expanded=False):
                 st.dataframe(df_savings_view, hide_index=True, use_container_width=True)
 
@@ -1333,7 +1752,7 @@ if data_loaded:
 
         # --- LOANS & AMORTIZATION TABLE SUMMARY ---
         st.markdown("<div class='section-title'>📋 Resumen de Créditos y Tabla de Amortizaciones</div>", unsafe_allow_html=True)
-        
+
         if not user_loans:
             st.info("💡 Esta persona no tiene créditos registrados o activos en el fondo actualmente.")
         else:
@@ -1341,14 +1760,14 @@ if data_loaded:
                 loan_tabs = st.tabs([f"Crédito {i+1} ({fmt_money(loan['Monto'])} - {str(loan.get('Estado', '')).upper()})" for i, loan in enumerate(user_loans)])
             else:
                 loan_tabs = [st.container()]
-                
+
             for idx, loan in enumerate(user_loans):
                 with loan_tabs[idx]:
                     is_active = 'ACTIVO' in str(loan.get('Estado', '')).upper()
                     loan_status_badge = "<span class='badge-status-activo'>CRÉDITO ACTIVO</span>" if is_active else "<span class='badge-status-cancelado'>CANCELADO / PAGADO</span>"
-                    
+
                     st.markdown(f"### Detalles del Crédito ID #{loan.get('ID', idx+1)} {loan_status_badge}", unsafe_allow_html=True)
-                    
+
                     # Credit Specific Cards Row
                     col_l1, col_l2, col_l3, col_l4, col_l5 = st.columns(5)
                     with col_l1:
@@ -1387,19 +1806,19 @@ if data_loaded:
                             <div class='card-value val-red'>{fmt_money(loan['Saldo Pendiente'], show_decimals=True)}</div>
                         </div>
                         """, unsafe_allow_html=True)
-                    
+
                     # Amortization Table Summary
                     st.markdown("<h4 style='margin-top: 18px;'>📑 Tabla de Amortización (Control de Cuotas)</h4>", unsafe_allow_html=True)
                     try:
                         loan_id = int(loan['ID']) if 'ID' in loan and not pd.isna(loan['ID']) else None
                     except (ValueError, TypeError):
                         loan_id = None
-                        
+
                     loan_person_name = str(loan.get('Nombre', selected_person)).strip().upper()
                     clean_person_name = normalize_name(loan_person_name)
                     loan_monto = float(loan.get('Monto', 0)) if pd.notna(loan.get('Monto')) else 0.0
                     loan_total_pagar = float(loan.get('Total a Pagar', 0)) if pd.notna(loan.get('Total a Pagar')) else 0.0
-                    
+
                     # Compute sequential loan index for this row in df_flujo
                     flujo_loan_idx = None
                     try:
@@ -1414,7 +1833,7 @@ if data_loaded:
                         candidate = amort_tables[loan_id]
                         if candidate.get('extracted_id') == loan_id or not candidate.get('clean_name') or candidate.get('clean_name') == clean_person_name:
                             matched_table = candidate
-                    
+
                     # 2. Match by normalized name + closest balance matching Monto or Total a Pagar
                     if matched_table is None and clean_person_name and '_all_blocks' in amort_tables:
                         candidate_blocks = [t for t in amort_tables['_all_blocks'] if t.get('clean_name') == clean_person_name]
@@ -1423,7 +1842,7 @@ if data_loaded:
                                 abs(t.get('initial_balance', 0.0) - loan_monto),
                                 abs(t.get('initial_balance', 0.0) - loan_total_pagar)
                             ))
-                                        
+
                     # 3. Match by clean_person_name directly or by sequential index
                     if matched_table is None and clean_person_name and clean_person_name in amort_tables:
                         matched_table = amort_tables[clean_person_name]
@@ -1435,10 +1854,10 @@ if data_loaded:
                             matched_table = candidate
                     elif matched_table is None and (idx + 1) in amort_tables and not clean_person_name:
                         matched_table = amort_tables[idx + 1]
-                    
+
                     if matched_table:
                         schedule_df = matched_table['schedule'].copy()
-                        
+
                         html_rows = []
                         for idx_p, r_item in schedule_df.iterrows():
                             f_val = str(r_item.get('Cuota / Fecha', '')).strip()
@@ -1446,7 +1865,7 @@ if data_loaded:
                             v_abono = r_item.get('Abono a Capital', 0)
                             v_int = r_item.get('Intereses', 0)
                             v_saldo = r_item.get('Saldo Pendiente', 0)
-                            
+
                             try:
                                 v_cuota_num = float(v_cuota) if not pd.isna(v_cuota) else 0.0
                                 v_abono_num = float(v_abono) if not pd.isna(v_abono) else 0.0
@@ -1458,7 +1877,7 @@ if data_loaded:
                             is_desembolso = (v_cuota_num == 0 and v_abono_num == 0 and v_int_num == 0) or f_val in ['0', '0.0', 'Desembolso']
                             row_class = "class='row-desembolso'" if is_desembolso else ""
                             lbl_cuota = f"🟢 Desembolso ({f_val})" if is_desembolso else f"📅 {f_val}"
-                            
+
                             html_rows.append(
                                 f"<tr {row_class}>"
                                 f"<td>{lbl_cuota}</td>"
@@ -1494,213 +1913,84 @@ if data_loaded:
     # --- TAB 2: GENERAL FUND STATUS ---
     # ==========================================
     with tab_fund:
-        st.markdown("<h2 style='margin-bottom: 0px;'>📊 Estado Consolidado del Fondo de Vecinos</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='color: #94a3b8; font-size: 1rem; margin-top: 4px;'>Balance general de capitales, créditos y utilidades acumuladas</p>", unsafe_allow_html=True)
+        render_fund_general_view(df_resumen, df_ahorros, df_flujo, full_people_list)
+
+
+
+# Run data loading
+try:
+    df_resumen, df_ahorros, df_flujo, df_whatsapp, amort_tables = load_data(SHEET_URL)
+    data_loaded = True
+except Exception as e:
+    st.error(f"Error al cargar los datos de Google Sheets: {e}")
+    data_loaded = False
+
+if data_loaded:
+    socios_list = [str(s).strip() for s in df_ahorros['Socio'].dropna() if str(s).strip()]
+    flujo_names = [str(n).strip() for n in df_flujo['Nombre'].dropna() if str(n).strip()]
+    
+    seen_names = set()
+    full_people_list = []
+    for name in socios_list + flujo_names:
+        norm = normalize_name(name)
+        if norm not in seen_names and name != "":
+            full_people_list.append(name)
+            seen_names.add(norm)
+    full_people_list = sorted(full_people_list)
+    
+    # Sidebar Logo & Branding
+    sb_col1, sb_col2, sb_col3 = st.sidebar.columns([1, 3, 1])
+    with sb_col2:
+        st.image("logo.png", use_container_width=True)
+    st.sidebar.markdown("---")
+    
+    # Sidebar Navigation Menu
+    st.sidebar.markdown("### 🧭 Menú Principal:")
+    if 'nav_mode' not in st.session_state:
+        st.session_state['nav_mode'] = "🏠 Inicio y Resumen General"
         
-        # Parse Fund summary metrics
-        metrics = parse_fund_metrics(df_resumen)
-        tot_ahorros_val = metrics['tot_ahorros_val']
-        int_ganados_val = metrics['int_ganados_val']
-        util_eventos_val = metrics['util_eventos_val']
-        fondo_total_val = metrics['fondo_total_val']
-        cap_prestado_val = metrics['cap_prestado_val']
-        gastos_op_val = metrics['gastos_op_val']
-        disponible_banco_val = metrics['disponible_banco_val']
-        caja_efectivo_val = metrics['caja_efectivo_val']
-        active_loans_mask = df_flujo['Estado del credito'].astype(str).str.upper().str.contains('ACTIVO') if 'Estado del credito' in df_flujo.columns else df_flujo['Estado'].astype(str).str.upper().str.contains('ACTIVO')
-
-        # Main Fund Metric Cards
-        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
-        with col_f1:
-            st.markdown(f"""
-            <div class='summary-card summary-card-purple'>
-                <span class='card-icon'>🏛️</span>
-                <div class='card-label'>Fondo Total Acumulado</div>
-                <div class='card-value val-purple'>{fmt_money(fondo_total_val, show_decimals=True)}</div>
-                <p class='card-subtext'>Patrimonio global del fondo</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col_f2:
-            st.markdown(f"""
-            <div class='summary-card summary-card-green'>
-                <span class='card-icon'>🏦</span>
-                <div class='card-label'>Total Ahorros Socios</div>
-                <div class='card-value val-green'>{fmt_money(tot_ahorros_val)}</div>
-                <p class='card-subtext'>Capital aportado por socios</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col_f3:
-            st.markdown(f"""
-            <div class='summary-card summary-card-red'>
-                <span class='card-icon'>📢</span>
-                <div class='card-label'>Capital Prestado</div>
-                <div class='card-value val-red'>{fmt_money(cap_prestado_val, show_decimals=True)}</div>
-                <p class='card-subtext'>Dinero en créditos activos</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col_f4:
-            st.markdown(f"""
-            <div class='summary-card summary-card-blue'>
-                <span class='card-icon'>💵</span>
-                <div class='card-label'>Disponible en Banco</div>
-                <div class='card-value val-blue'>{fmt_money(disponible_banco_val, show_decimals=True)}</div>
-                <p class='card-subtext'>Liquidez en cuenta bancaria</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # Secondary Fund Cards
-        col_f5, col_f6, col_f7, col_f8 = st.columns(4)
-        with col_f5:
-            st.markdown(f"""
-            <div class='summary-card'>
-                <span class='card-icon'>📈</span>
-                <div class='card-label'>Intereses Cobrados</div>
-                <div class='card-value val-green'>{fmt_money(int_ganados_val, show_decimals=True)}</div>
-                <p class='card-subtext'>Ganancias reales cobradas</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col_f6:
-            st.markdown(f"""
-            <div class='summary-card'>
-                <span class='card-icon'>🎟️</span>
-                <div class='card-label'>Utilidad Eventos / Rifas</div>
-                <div class='card-value val-blue'>{fmt_money(util_eventos_val, show_decimals=True)}</div>
-                <p class='card-subtext'>Ingresos extraordinarios</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col_f7:
-            st.markdown(f"""
-            <div class='summary-card'>
-                <span class='card-icon'>💼</span>
-                <div class='card-label'>Caja Efectivo</div>
-                <div class='card-value val-gray'>{fmt_money(caja_efectivo_val, show_decimals=True)}</div>
-                <p class='card-subtext'>Dinero físico en caja</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col_f8:
-            st.markdown(f"""
-            <div class='summary-card summary-card-red'>
-                <span class='card-icon'>🧾</span>
-                <div class='card-label'>Gastos Operativos</div>
-                <div class='card-value val-red'>{fmt_money(gastos_op_val, show_decimals=True)}</div>
-                <p class='card-subtext'>Egresos y costos del fondo</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        # 1-Click Download Button for Ficha 2 PNG Image
-        card2_buf = generate_fund_card_png(
-            fondo_total_val, tot_ahorros_val, cap_prestado_val, disponible_banco_val,
-            int_ganados_val, util_eventos_val, caja_efectivo_val, gastos_op_val
-        )
-        st.download_button(
-            label="📥 Descargar Ficha 2 - Estado General del Fondo (Imagen PNG)",
-            data=card2_buf,
-            file_name="Ficha2_Estado_General_Fondo.png",
-            mime="image/png",
-            use_container_width=True
+    nav_mode = st.sidebar.radio(
+        label="Navegación",
+        options=["🏠 Inicio y Resumen General", "👤 Consulta Individual"],
+        key="nav_mode",
+        label_visibility="collapsed"
+    )
+    
+    if nav_mode == "👤 Consulta Individual":
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### 👤 Seleccionar Persona:")
+        if 'selected_person_select' not in st.session_state or st.session_state['selected_person_select'] not in full_people_list:
+            st.session_state['selected_person_select'] = full_people_list[0]
+            
+        selected_person = st.sidebar.selectbox(
+            label="Persona",
+            options=full_people_list,
+            key="selected_person_select",
+            label_visibility="collapsed"
         )
         
-        st.markdown("---")
-
-        # Visual layout for Fund assets and overview
-        col_pie, col_details = st.columns([1, 1])
+        person_info = compute_person_financials(selected_person, df_ahorros, df_flujo, df_whatsapp, socios_list, df_resumen)
+        st.sidebar.markdown(f"<div style='text-align: center; margin-top: 10px; display: flex; flex-direction: column; gap: 6px; align-items: center;'><span class='{person_info['user_badge_class']}'>{person_info['user_type_label']}</span>{person_info['user_status_eval']['overall_badge']}</div>", unsafe_allow_html=True)
+    else:
+        selected_person = full_people_list[0] if full_people_list else ""
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### 📊 Estado Rápido:")
+        st.sidebar.markdown(f"👥 **{len(socios_list)}** Socios Ahorradores<br/>💼 **{len(full_people_list)}** Participantes Totales", unsafe_allow_html=True)
         
-        with col_pie:
-            assets = ['📢 Capital Prestado', '💵 Disponible en Banco', '🧾 Gastos Operativos', '💼 Caja efectivo']
-            asset_values = [cap_prestado_val, disponible_banco_val, gastos_op_val, caja_efectivo_val]
-            
-            fig_pie = go.Figure(data=[go.Pie(
-                labels=assets,
-                values=asset_values,
-                hole=0.55,
-                marker=dict(
-                    colors=['#f43f5e', '#3b82f6', '#ef4444', '#94a3b8'],
-                    line=dict(color='#1e293b', width=2)
-                ),
-                textinfo='percent',
-                textposition='auto',
-                hovertemplate="<b>%{label}</b><br>Monto: $ %{value:,.2f}<br>Porcentaje: %{percent}<extra></extra>",
-                textfont=dict(size=13, color='#f8fafc')
-            )])
-            fig_pie.update_layout(
-                title=dict(
-                    text="<b>🏛️ Distribución del Patrimonio del Fondo</b>",
-                    font=dict(size=17, color='#f8fafc'),
-                    x=0.5,
-                    xanchor='center'
-                ),
-                paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(0,0,0,0)',
-                font_color='#cbd5e1',
-                showlegend=True,
-                legend=dict(
-                    orientation="h",
-                    yanchor="top",
-                    y=-0.22,
-                    xanchor="center",
-                    x=0.5,
-                    font=dict(color="#cbd5e1", size=12)
-                ),
-                margin=dict(l=20, r=20, t=50, b=120),
-                annotations=[dict(
-                    text=f"<b>FONDO TOTAL<br>{fmt_money(fondo_total_val)}</b>",
-                    x=0.5, y=0.5,
-                    font=dict(size=13, color="#38bdf8"),
-                    showarrow=False
-                )]
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
-
-        with col_details:
-            st.markdown("### 📋 Resumen del Balance General")
-            balance_items = [
-                {'Concepto': 'Total Ahorros Socios', 'Valor ($)': fmt_money(tot_ahorros_val, show_decimals=True)},
-                {'Concepto': 'Intereses Ganados (Cobrados)', 'Valor ($)': fmt_money(int_ganados_val, show_decimals=True)},
-                {'Concepto': 'Utilidad Eventos/Rifas', 'Valor ($)': fmt_money(util_eventos_val, show_decimals=True)},
-                {'Concepto': 'Fondo Total Acumulado', 'Valor ($)': fmt_money(fondo_total_val, show_decimals=True)},
-                {'Concepto': 'Capital Prestado (En calle)', 'Valor ($)': fmt_money(cap_prestado_val, show_decimals=True)},
-                {'Concepto': 'Disponible en Banco', 'Valor ($)': fmt_money(disponible_banco_val, show_decimals=True)},
-                {'Concepto': 'Gastos Operativos', 'Valor ($)': fmt_money(gastos_op_val, show_decimals=True)},
-                {'Concepto': 'Caja Efectivo', 'Valor ($)': fmt_money(caja_efectivo_val, show_decimals=True)}
-            ]
-            st.dataframe(pd.DataFrame(balance_items), hide_index=True, use_container_width=True)
-            
-            total_active_loans_amt = cap_prestado_val
-            total_active_loans_count = len(df_flujo[active_loans_mask])
-            
-            # Global Activity Summary
-            all_evals = [evaluate_participant_status(p, df_ahorros, df_flujo) for p in full_people_list]
-            count_aldia = sum(1 for e in all_evals if e['overall_status'] == 'AL_DIA')
-            count_inactivo = sum(1 for e in all_evals if e['overall_status'] == 'INACTIVO')
-            count_retirado = sum(1 for e in all_evals if e['overall_status'] == 'RETIRADO')
-            
-            st.markdown(f"""
-            <div class='alert-card' style='margin-top: 15px;'>
-                💼 <b>Préstamos activos totales:</b> {total_active_loans_count}<br>
-                💵 <b>Monto en préstamos en la calle:</b> {fmt_money(total_active_loans_amt, show_decimals=True)}<br>
-                👥 <b>Estatus Participantes:</b> <span style='color: #34d399;'>{count_aldia} Al día</span> | <span style='color: #fb7185;'>{count_inactivo} Inactivos / Mora</span> | <span style='color: #94a3b8;'>{count_retirado} Retirados</span>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            with st.expander("🚨 Ver Lista de Participantes Inactivos / En Mora", expanded=False):
-                inactivos_list = []
-                for p, ev in zip(full_people_list, all_evals):
-                    if ev['overall_status'] == 'INACTIVO':
-                        reasons = " | ".join(ev['ahorro_reasons'] + ev['loan_reasons'])
-                        inactivos_list.append({
-                            'Participante': p,
-                            'Detalle Novedad': reasons.replace('<b>', '').replace('</b>', '')
-                        })
-                if inactivos_list:
-                    st.dataframe(pd.DataFrame(inactivos_list), hide_index=True, use_container_width=True)
-                else:
-                    st.success("🎉 ¡No hay participantes inactivos!")
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🔗 Accesos:")
+    st.sidebar.markdown(f"[📂 Planilla Excel Drive](https://docs.google.com/spreadsheets/d/1ZL5aORQJ7C00YgpMUOfoXyKYtMkB2PRfbKUNrCGQPMc/edit?usp=sharing)")
+    
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🔄 Actualizar Datos", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+        
+        
+    if nav_mode == "🏠 Inicio y Resumen General":
+        render_home_page(df_resumen, df_ahorros, df_flujo, df_whatsapp, full_people_list, socios_list)
+    else:
+        render_individual_page(selected_person, df_resumen, df_ahorros, df_flujo, df_whatsapp, amort_tables, full_people_list, socios_list)
 
     # Footer
     st.markdown("---")
