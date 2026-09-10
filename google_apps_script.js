@@ -420,101 +420,107 @@ function crearPestanaLiquidador() {
   sheetLiquidador.getRange("C6").setValue("Retiro voluntario");
   sheetLiquidador.getRange("D6").setValue("Texto explicativo libre").setFontColor("#64748b").setFontStyle("italic");
   
-  // Fila 7: Cantidad de Participantes
-  sheetLiquidador.getRange("B7").setValue("Cantidad de Participantes (para prorrateo):").setFontWeight("bold");
+  // Fila 7: Cantidad de Participantes (Prorrateo Rifas y Eventos)
+  sheetLiquidador.getRange("B7").setValue("Cant. Participantes (Prorrateo Rifas y Eventos):").setFontWeight("bold");
   sheetLiquidador.getRange("C7").setValue(19);
   sheetLiquidador.getRange("C7").setNumberFormat("#,##0");
-  sheetLiquidador.getRange("D7").setValue("Ajustar manualmente según participantes activos").setFontColor("#64748b").setFontStyle("italic");
+  sheetLiquidador.getRange("D7").setValue("Ajustar según socios activos en eventos/rifas").setFontColor("#64748b").setFontStyle("italic");
   
-  // Resaltar celdas de entrada del usuario (C4 a C7) en amarillo suave
-  sheetLiquidador.getRange("C4:C7").setBackground("#fef9c3");
+  // Fila 8: Cantidad de Participantes (Prorrateo Intereses Ganados)
+  sheetLiquidador.getRange("B8").setValue("Cant. Participantes (Prorrateo Intereses Ganados):").setFontWeight("bold");
+  sheetLiquidador.getRange("C8").setValue(19);
+  sheetLiquidador.getRange("C8").setNumberFormat("#,##0");
+  sheetLiquidador.getRange("D8").setValue("Ajustar según socios con derecho a intereses").setFontColor("#64748b").setFontStyle("italic");
   
-  // Fila 9: Sección 2 - Conceptos a Favor
-  sheetLiquidador.getRange("B9:D9").merge();
-  sheetLiquidador.getRange("B9").setValue("2. CONCEPTOS A FAVOR DEL SOCIO (+)");
-  sheetLiquidador.getRange("B9:D9")
+  // Resaltar celdas de entrada del usuario (C4 a C8) en amarillo suave
+  sheetLiquidador.getRange("C4:C8").setBackground("#fef9c3");
+  
+  // Fila 10: Sección 2 - Conceptos a Favor
+  sheetLiquidador.getRange("B10:D10").merge();
+  sheetLiquidador.getRange("B10").setValue("2. CONCEPTOS A FAVOR DEL SOCIO (+)");
+  sheetLiquidador.getRange("B10:D10")
     .setBackground("#e2e8f0")
     .setFontColor("#1e293b")
     .setFontWeight("bold")
     .setFontSize(10)
     .setHorizontalAlignment("left");
-  sheetLiquidador.setRowHeight(9, 26);
+  sheetLiquidador.setRowHeight(10, 26);
   
-  // Fila 10: Total Aportes a la Fecha
-  sheetLiquidador.getRange("B10").setValue("Total Aportes a la Fecha (Ahorros):");
-  sheetLiquidador.getRange("C10").setFormula("=IF(C4=\"\", 0, IFERROR(XLOOKUP(C4, 'CONTROL AHORRO'!A5:A, 'CONTROL AHORRO'!AK5:AK, 0), 0))");
-  sheetLiquidador.getRange("D10").setValue("Suma de aportes en CONTROL AHORRO (Col AK)").setFontColor("#64748b").setFontStyle("italic");
+  // Fila 11: Total Aportes a la Fecha
+  sheetLiquidador.getRange("B11").setValue("Total Aportes a la Fecha (Ahorros):");
+  sheetLiquidador.getRange("C11").setFormula("=IF(C4=\"\", 0, IFERROR(XLOOKUP(C4, 'CONTROL AHORRO'!A5:A, 'CONTROL AHORRO'!AK5:AK, 0), 0))");
+  sheetLiquidador.getRange("D11").setValue("Suma de aportes en CONTROL AHORRO (Col AK)").setFontColor("#64748b").setFontStyle("italic");
   
-  // Fila 11: Utilidad por Rifas y Eventos
-  sheetLiquidador.getRange("B11").setValue("Utilidad por Rifas y Eventos:");
-  sheetLiquidador.getRange("C11").setFormula("=IF(OR(C7=\"\", C7=0), 0, 'RESUMEN GENERAL'!C7 / C7)");
-  sheetLiquidador.getRange("D11").setValue("RESUMEN GENERAL C7 dividido en participantes").setFontColor("#64748b").setFontStyle("italic");
+  // Fila 12: Utilidad por Rifas y Eventos (Prorrateado con C7)
+  sheetLiquidador.getRange("B12").setValue("Utilidad por Rifas y Eventos:");
+  sheetLiquidador.getRange("C12").setFormula("=IF(OR(C7=\"\", C7=0), 0, 'RESUMEN GENERAL'!C7 / C7)");
+  sheetLiquidador.getRange("D12").setValue("RESUMEN GENERAL C7 dividido en participantes de rifas (C7)").setFontColor("#64748b").setFontStyle("italic");
   
-  // Fila 12: Intereses Ganados (Cobrados)
-  sheetLiquidador.getRange("B12").setValue("Intereses Ganados (Cobrados):");
-  sheetLiquidador.getRange("C12").setFormula("=IF(OR(C7=\"\", C7=0), 0, 'RESUMEN GENERAL'!C6 / C7)");
-  sheetLiquidador.getRange("D12").setValue("RESUMEN GENERAL C6 dividido en participantes").setFontColor("#64748b").setFontStyle("italic");
+  // Fila 13: Intereses Ganados (Cobrados) (Prorrateado con C8)
+  sheetLiquidador.getRange("B13").setValue("Intereses Ganados (Cobrados):");
+  sheetLiquidador.getRange("C13").setFormula("=IF(OR(C8=\"\", C8=0), 0, 'RESUMEN GENERAL'!C6 / C8)");
+  sheetLiquidador.getRange("D13").setValue("RESUMEN GENERAL C6 dividido en participantes de intereses (C8)").setFontColor("#64748b").setFontStyle("italic");
   
-  // Fila 13: Subtotal a Favor
-  sheetLiquidador.getRange("B13").setValue("SUBTOTAL A FAVOR:").setFontWeight("bold");
-  sheetLiquidador.getRange("C13").setFormula("=SUM(C10:C12)").setFontWeight("bold");
-  sheetLiquidador.getRange("B13:C13").setBackground("#f1f5f9");
+  // Fila 14: Subtotal a Favor
+  sheetLiquidador.getRange("B14").setValue("SUBTOTAL A FAVOR:").setFontWeight("bold");
+  sheetLiquidador.getRange("C14").setFormula("=SUM(C11:C13)").setFontWeight("bold");
+  sheetLiquidador.getRange("B14:C14").setBackground("#f1f5f9");
   
-  // Fila 15: Sección 3 - Deducciones
-  sheetLiquidador.getRange("B15:D15").merge();
-  sheetLiquidador.getRange("B15").setValue("3. DEDUCCIONES Y GASTOS COMPARTIDOS (-)");
-  sheetLiquidador.getRange("B15:D15")
+  // Fila 16: Sección 3 - Deducciones
+  sheetLiquidador.getRange("B16:D16").merge();
+  sheetLiquidador.getRange("B16").setValue("3. DEDUCCIONES Y GASTOS COMPARTIDOS (-)");
+  sheetLiquidador.getRange("B16:D16")
     .setBackground("#e2e8f0")
     .setFontColor("#1e293b")
     .setFontWeight("bold")
     .setFontSize(10)
     .setHorizontalAlignment("left");
-  sheetLiquidador.setRowHeight(15, 26);
+  sheetLiquidador.setRowHeight(16, 26);
   
-  // Filas 16-19: Descuentos
-  sheetLiquidador.getRange("B16").setValue("Placa Conmemorativa Fondo:");
-  sheetLiquidador.getRange("C16").setValue(0).setBackground("#fef9c3");
-  sheetLiquidador.getRange("D16").setValue("Valor a descontar (manual)").setFontColor("#64748b").setFontStyle("italic");
-  
-  sheetLiquidador.getRange("B17").setValue("Almuerzo Socios:");
+  // Filas 17-20: Descuentos
+  sheetLiquidador.getRange("B17").setValue("Placa Conmemorativa Fondo:");
   sheetLiquidador.getRange("C17").setValue(0).setBackground("#fef9c3");
   sheetLiquidador.getRange("D17").setValue("Valor a descontar (manual)").setFontColor("#64748b").setFontStyle("italic");
   
-  sheetLiquidador.getRange("B18").setValue("Colilla Préstamos:");
+  sheetLiquidador.getRange("B18").setValue("Almuerzo Socios:");
   sheetLiquidador.getRange("C18").setValue(0).setBackground("#fef9c3");
-  sheetLiquidador.getRange("D18").setValue("Saldo pendiente / gastos colilla (manual)").setFontColor("#64748b").setFontStyle("italic");
+  sheetLiquidador.getRange("D18").setValue("Valor a descontar (manual)").setFontColor("#64748b").setFontStyle("italic");
   
-  sheetLiquidador.getRange("B19").setValue("Otros Descuentos:");
+  sheetLiquidador.getRange("B19").setValue("Colilla Préstamos:");
   sheetLiquidador.getRange("C19").setValue(0).setBackground("#fef9c3");
-  sheetLiquidador.getRange("D19").setValue("Cualquier otro concepto a descontar").setFontColor("#64748b").setFontStyle("italic");
+  sheetLiquidador.getRange("D19").setValue("Saldo pendiente / gastos colilla (manual)").setFontColor("#64748b").setFontStyle("italic");
   
-  // Fila 20: Subtotal Deducciones
-  sheetLiquidador.getRange("B20").setValue("TOTAL DEDUCCIONES:").setFontWeight("bold");
-  sheetLiquidador.getRange("C20").setFormula("=SUM(C16:C19)").setFontWeight("bold");
-  sheetLiquidador.getRange("B20:C20").setBackground("#f1f5f9");
+  sheetLiquidador.getRange("B20").setValue("Otros Descuentos:");
+  sheetLiquidador.getRange("C20").setValue(0).setBackground("#fef9c3");
+  sheetLiquidador.getRange("D20").setValue("Cualquier otro concepto a descontar").setFontColor("#64748b").setFontStyle("italic");
   
-  // Fila 22: TOTAL A FAVOR
-  sheetLiquidador.getRange("B22").setValue("TOTAL A FAVOR (VALOR NETO A LIQUIDAR):").setFontWeight("bold").setFontSize(12);
-  sheetLiquidador.getRange("C22").setFormula("=C13 - C20").setFontWeight("bold").setFontSize(12);
-  sheetLiquidador.getRange("D22").setValue("Total neto a pagar al socio saliente").setFontWeight("bold").setFontColor("#065f46");
-  sheetLiquidador.getRange("B22:D22").setBackground("#d1fae5").setFontColor("#065f46");
-  sheetLiquidador.setRowHeight(22, 36);
+  // Fila 21: Subtotal Deducciones
+  sheetLiquidador.getRange("B21").setValue("TOTAL DEDUCCIONES:").setFontWeight("bold");
+  sheetLiquidador.getRange("C21").setFormula("=SUM(C17:C20)").setFontWeight("bold");
+  sheetLiquidador.getRange("B21:C21").setBackground("#f1f5f9");
+  
+  // Fila 23: TOTAL A FAVOR
+  sheetLiquidador.getRange("B23").setValue("TOTAL A FAVOR (VALOR NETO A LIQUIDAR):").setFontWeight("bold").setFontSize(12);
+  sheetLiquidador.getRange("C23").setFormula("=C14 - C21").setFontWeight("bold").setFontSize(12);
+  sheetLiquidador.getRange("D23").setValue("Total neto a pagar al socio saliente").setFontWeight("bold").setFontColor("#065f46");
+  sheetLiquidador.getRange("B23:D23").setBackground("#d1fae5").setFontColor("#065f46");
+  sheetLiquidador.setRowHeight(23, 36);
   
   // Formato de moneda para valores monetarios
-  var currencyRanges = ["C10", "C11", "C12", "C13", "C16", "C17", "C18", "C19", "C20", "C22"];
+  var currencyRanges = ["C11", "C12", "C13", "C14", "C17", "C18", "C19", "C20", "C21", "C23"];
   for (var i = 0; i < currencyRanges.length; i++) {
     sheetLiquidador.getRange(currencyRanges[i]).setNumberFormat("$#,##0");
   }
   
   // Bordes finos y alineaciones
-  sheetLiquidador.getRange("B4:D7").setBorder(true, true, true, true, true, true, "#cbd5e1", SpreadsheetApp.BorderStyle.SOLID);
-  sheetLiquidador.getRange("B10:D13").setBorder(true, true, true, true, true, true, "#cbd5e1", SpreadsheetApp.BorderStyle.SOLID);
-  sheetLiquidador.getRange("B16:D20").setBorder(true, true, true, true, true, true, "#cbd5e1", SpreadsheetApp.BorderStyle.SOLID);
-  sheetLiquidador.getRange("B22:D22").setBorder(true, true, true, true, true, true, "#059669", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  sheetLiquidador.getRange("B4:D8").setBorder(true, true, true, true, true, true, "#cbd5e1", SpreadsheetApp.BorderStyle.SOLID);
+  sheetLiquidador.getRange("B11:D14").setBorder(true, true, true, true, true, true, "#cbd5e1", SpreadsheetApp.BorderStyle.SOLID);
+  sheetLiquidador.getRange("B17:D21").setBorder(true, true, true, true, true, true, "#cbd5e1", SpreadsheetApp.BorderStyle.SOLID);
+  sheetLiquidador.getRange("B23:D23").setBorder(true, true, true, true, true, true, "#059669", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
   
-  sheetLiquidador.getRange("B4:B22").setHorizontalAlignment("left");
-  sheetLiquidador.getRange("C4:C22").setHorizontalAlignment("right");
-  sheetLiquidador.getRange("D4:D22").setHorizontalAlignment("left");
+  sheetLiquidador.getRange("B4:B23").setHorizontalAlignment("left");
+  sheetLiquidador.getRange("C4:C23").setHorizontalAlignment("right");
+  sheetLiquidador.getRange("D4:D23").setHorizontalAlignment("left");
   sheetLiquidador.getRange("C4:C6").setHorizontalAlignment("left");
-  SpreadsheetApp.getUi().alert("Pestaña 'LIQUIDADOR' creada y configurada con éxito. Puedes seleccionar el socio en C4.");
+  SpreadsheetApp.getUi().alert("Pestaña 'LIQUIDADOR' actualizada con éxito. Ahora cuentas con casillas independientes de prorrateo para Rifas (C7) e Intereses (C8).");
 }
