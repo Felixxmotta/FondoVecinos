@@ -346,9 +346,8 @@ function formatDateDDMMYYYY(d) {
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu("⚡ Fondo Vecinos")
-    .addItem("🔘 Procesar Liquidación de Socio Actual (C4)", "procesarLiquidacion")
+    .addItem("🔘 Aplicar Liquidación a Resumen General (C23)", "aplicarLiquidacionAResumen")
     .addSeparator()
-    .addItem("Crear / Configurar Pestaña LIQUIDADOR", "crearPestanaLiquidador")
     .addItem("Configurar Fila de Liquidaciones en RESUMEN GENERAL", "configurarFilaLiquidacionesManual")
     .addItem("Reparar Fórmulas Flujo Préstamos", "repararTodasLasFormulas")
     .addToUi();
@@ -361,7 +360,15 @@ function crearPestanaLiquidador() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetLiquidador = getSheetFlexible(ss, "LIQUIDADOR");
   
-  if (!sheetLiquidador) {
+  if (sheetLiquidador) {
+    var ui = SpreadsheetApp.getUi();
+    var resp = ui.alert(
+      "⚠️ Atención",
+      "La pestaña 'LIQUIDADOR' ya existe en tu hoja de cálculo.\n\n¿Deseas restablecerla con la plantilla predeterminada? (Esto reemplazará los cálculos manuales actuales de esa pestaña).",
+      ui.ButtonSet.YES_NO
+    );
+    if (resp !== ui.Button.YES) return;
+  } else {
     sheetLiquidador = ss.insertSheet("LIQUIDADOR");
   }
   
@@ -681,37 +688,46 @@ function configurarFilaLiquidacionesManual() {
 }
 
 /**
- * PROCESAR LIQUIDACIÓN:
- * 1. Toma los datos del socio actual en la pestaña LIQUIDADOR.
- * 2. Solicita confirmación al usuario.
- * 3. Registra el comprobante en 'HISTORIAL LIQUIDACIONES'.
- * 4. Inserta / actualiza la fila de descuento en 'RESUMEN GENERAL' (entre CAJA EFECTIVO y TOTAL).
- * 5. Marca al socio como [RETIRADO] en 'CONTROL AHORRO' y 'WHATSAPP', actualizando los desplegables.
+ * APLICAR LIQUIDACIÓN AL RESUMEN GENERAL (BOTÓN EN PESTAÑA LIQUIDADOR)
+ * 
+ * 1. Toma exclusivamente el valor neto a liquidar de la celda C23 de LIQUIDADOR.
+ * 2. Lee los datos informativos del socio (C4, C5, C6) para el comprobante.
+ * 3. Solicita confirmación en pantalla antes de proceder.
+ * 4. Guarda el comprobante contable en la pestaña 'HISTORIAL LIQUIDACIONES'.
+ * 5. Crea o actualiza la fila de descuento en 'RESUMEN GENERAL' (debajo de CAJA EFECTIVO y antes del TOTAL).
+ * 6. NO altera los nombres ni las fórmulas en CONTROL AHORRO, WHATSAPP ni en el LIQUIDADOR.
  */
-function procesarLiquidacion() {
+function aplicarLiquidacionAResumen() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var ui = SpreadsheetApp.getUi();
   
   var sheetLiq = getSheetFlexible(ss, "LIQUIDADOR");
   if (!sheetLiq) {
-    ui.alert("⚠️ Error", "No se encontró la pestaña 'LIQUIDADOR'. Por favor ejecute primero 'Crear / Configurar Pestaña LIQUIDADOR'.", ui.ButtonSet.OK);
+    ui.alert("⚠️ Error", "No se encontró la pestaña 'LIQUIDADOR'. Por favor verifique el nombre de la hoja.", ui.ButtonSet.OK);
     return;
   }
   
-  // 1. Obtener datos del socio a liquidar
-  var socioRaw = sheetLiq.getRange("C4").getValue().toString().trim();
-  if (!socioRaw) {
-    ui.alert("⚠️ Campo Vacío", "Por favor seleccione un socio en la celda C4 de la pestaña LIQUIDADOR.", ui.ButtonSet.OK);
+  // 1. Obtener y validar el valor neto a liquidar de la celda C23
+  var valNetoRaw = sheetLiq.getRange("C23").getValue();
+  var netoPagar = parseFloat(valNetoRaw);
+  
+  if (isNaN(netoPagar) || netoPagar <= 0) {
+    ui.alert(
+      "⚠️ Celda C23 Vacía o en Cero",
+      "El valor neto a liquidar en la celda C23 es $0 o no contiene un valor numérico válido.\n\n" +
+      "Por favor defina la liquidación del socio en la pestaña LIQUIDADOR antes de presionar el botón.",
+      ui.ButtonSet.OK
+    );
     return;
   }
   
-  // Limpiar etiqueta de retirado previa si la tiene
-  var nombreLimpio = socioRaw.replace(/\s*\[RETIRADO\]|\s*\(RETIRADO\)/gi, "").trim().toUpperCase();
-  var yaEstabaRetirado = (socioRaw.toUpperCase().indexOf("RETIRADO") !== -1);
+  // 2. Datos informativos adicionales (para el comprobante e historial)
+  var socioNombre = (sheetLiq.getRange("C4").getValue() || "").toString().trim();
+  if (!socioNombre) socioNombre = "SOCIO NO ESPECIFICADO";
   
   var fechaLiqVal = sheetLiq.getRange("C5").getValue();
   var fechaLiqStr = "";
-  if (fechaLiqVal instanceof Date) {
+  if (fechaLiqVal instanceof Date && !isNaN(fechaLiqVal.getTime())) {
     fechaLiqStr = formatDateDDMMYYYY(fechaLiqVal);
   } else if (fechaLiqVal) {
     fechaLiqStr = fechaLiqVal.toString().trim();
@@ -719,109 +735,70 @@ function procesarLiquidacion() {
     fechaLiqStr = formatDateDDMMYYYY(new Date());
   }
   
-  var motivo = sheetLiq.getRange("C6").getValue().toString().trim() || "Retiro voluntario";
+  var motivo = (sheetLiq.getRange("C6").getValue() || "").toString().trim() || "Retiro voluntario / Liquidación";
   var totalAportes = parseFloat(sheetLiq.getRange("C11").getValue()) || 0;
   var utilRifas = parseFloat(sheetLiq.getRange("C12").getValue()) || 0;
   var intGanados = parseFloat(sheetLiq.getRange("C13").getValue()) || 0;
-  var subtotalFavor = parseFloat(sheetLiq.getRange("C14").getValue()) || (totalAportes + utilRifas + intGanados);
   var totalDeducciones = parseFloat(sheetLiq.getRange("C21").getValue()) || 0;
-  var netoPagar = parseFloat(sheetLiq.getRange("C23").getValue()) || (subtotalFavor - totalDeducciones);
   
   var formattedNeto = Utilities.formatNumber(netoPagar, "es_CO", "$#,##0");
   
-  // 2. Diálogo de confirmación
-  var mensajeConfirmacion = "¿Está seguro de procesar la liquidación de:\n\n" +
-    "👤 Socio: " + nombreLimpio + "\n" +
+  // 3. Confirmación previa en pantalla
+  var mensajeConfirmacion = "¿Desea aplicar y descontar esta liquidación en el Fondo?\n\n" +
+    "👤 Socio: " + socioNombre + "\n" +
     "📅 Fecha: " + fechaLiqStr + "\n" +
-    "💵 Neto a Pagar: " + formattedNeto + "\n\n" +
+    "📝 Motivo: " + motivo + "\n" +
+    "💵 VALOR NETO A DESCONTAR (C23): " + formattedNeto + "\n\n" +
     "Efectos al confirmar:\n" +
-    "• Se descontará este valor en 'RESUMEN GENERAL' (bajo 'LIQUIDACIONES PAGADAS').\n" +
-    "• Se registrará el comprobante en 'HISTORIAL LIQUIDACIONES'.\n" +
-    "• El socio se marcará como '" + nombreLimpio + " [RETIRADO]' en las listas y desplegables.";
+    "• Se archivará el comprobante en 'HISTORIAL LIQUIDACIONES'.\n" +
+    "• Se creará / actualizará la celda en 'RESUMEN GENERAL' debajo de 'CAJA EFECTIVO'.\n" +
+    "• El Total del Fondo restará este valor automáticamente.\n" +
+    "• Tus tablas de CONTROL AHORRO y préstamos no se modificarán.";
     
-  if (yaEstabaRetirado) {
-    mensajeConfirmacion = "⚠️ ATENCIÓN: Este socio ya tenía la marca de [RETIRADO].\n\n" + mensajeConfirmacion;
-  }
-  
-  var respuesta = ui.alert("Confirmar Liquidación y Salida de Dinero", mensajeConfirmacion, ui.ButtonSet.YES_NO);
+  var respuesta = ui.alert("🔘 Confirmar Aplicación de Liquidación", mensajeConfirmacion, ui.ButtonSet.YES_NO);
   if (respuesta !== ui.Button.YES) {
-    ui.alert("Operación cancelada", "No se realizó ninguna modificación.", ui.ButtonSet.OK);
+    ui.alert("Operación Cancelada", "No se realizó ninguna modificación.", ui.ButtonSet.OK);
     return;
   }
   
-  // 3. Registrar en HISTORIAL LIQUIDACIONES
+  // 4. Registrar en HISTORIAL LIQUIDACIONES
   var sheetHistorial = asegurarHistorialLiquidaciones(ss);
   var nextRowHistorial = sheetHistorial.getLastRow() + 1;
+  var ahoraStr = Utilities.formatDate(new Date(), getSafeTimeZone(), "dd/MM/yyyy HH:mm:ss");
+  
   sheetHistorial.getRange(nextRowHistorial, 1, 1, 9).setValues([[
     fechaLiqStr,
-    nombreLimpio,
+    socioNombre.toUpperCase(),
     motivo,
     totalAportes,
     utilRifas,
     intGanados,
     totalDeducciones,
     netoPagar,
-    Utilities.formatDate(new Date(), getSafeTimeZone(), "dd/MM/yyyy HH:mm:ss")
+    ahoraStr
   ]]);
   
-  // Formatos en la fila del historial
   sheetHistorial.getRange(nextRowHistorial, 4, 1, 5).setNumberFormat("$#,##0");
   sheetHistorial.getRange(nextRowHistorial, 1, 1, 9).setHorizontalAlignment("left");
   sheetHistorial.getRange(nextRowHistorial, 4, 1, 5).setHorizontalAlignment("right");
   sheetHistorial.getRange(nextRowHistorial, 8).setFontWeight("bold").setFontColor("#991b1b");
   
-  // 4. Asegurar y actualizar fila en RESUMEN GENERAL
+  // 5. Asegurar y sincronizar fila en RESUMEN GENERAL (debajo de CAJA EFECTIVO y antes de TOTAL)
   asegurarFilaLiquidacionesEnResumen(ss);
   
-  // 5. Marcar al socio como [RETIRADO] en CONTROL AHORRO
-  var sheetAhorros = getSheetFlexible(ss, "CONTROL AHORRO");
-  var nuevoNombreSocio = nombreLimpio + " [RETIRADO]";
-  
-  if (sheetAhorros) {
-    var lastRowAhorros = sheetAhorros.getLastRow();
-    var nombresAhorros = sheetAhorros.getRange("A5:A" + lastRowAhorros).getValues();
-    for (var i = 0; i < nombresAhorros.length; i++) {
-      var n = (nombresAhorros[i][0] || "").toString().trim().toUpperCase();
-      var nBase = n.replace(/\s*\[RETIRADO\]|\s*\(RETIRADO\)/gi, "").trim();
-      if (nBase === nombreLimpio) {
-        var rowIdx = i + 5;
-        sheetAhorros.getRange(rowIdx, 1).setValue(nuevoNombreSocio)
-          .setFontWeight("bold")
-          .setFontColor("#dc2626");
-        // Resaltar la fila en gris suave para indicar socio retirado
-        sheetAhorros.getRange(rowIdx, 1, 1, sheetAhorros.getLastColumn()).setBackground("#f8fafc");
-        break;
-      }
-    }
-  }
-  
-  // 6. Marcar al socio en WHATSAPP si existe
-  var sheetWa = getSheetFlexible(ss, "WHATSAPP");
-  if (sheetWa) {
-    var lastRowWa = sheetWa.getLastRow();
-    if (lastRowWa >= 2) {
-      var nombresWa = sheetWa.getRange("A2:A" + lastRowWa).getValues();
-      for (var j = 0; j < nombresWa.length; j++) {
-        var nw = (nombresWa[j][0] || "").toString().trim().toUpperCase();
-        var nwBase = nw.replace(/\s*\[RETIRADO\]|\s*\(RETIRADO\)/gi, "").trim();
-        if (nwBase === nombreLimpio) {
-          sheetWa.getRange(j + 2, 1).setValue(nuevoNombreSocio).setFontColor("#dc2626");
-          break;
-        }
-      }
-    }
-  }
-  
-  // 7. Actualizar celda C4 en LIQUIDADOR para que muestre el nuevo nombre con [RETIRADO]
-  sheetLiq.getRange("C4").setValue(nuevoNombreSocio);
-  
-  // 8. Mensaje de éxito final
-  var resumenExito = "✅ Liquidación procesada exitosamente:\n\n" +
-    "• Socio: " + nuevoNombreSocio + "\n" +
-    "• Salida registrada: " + formattedNeto + "\n" +
-    "• Se descontó en 'RESUMEN GENERAL' en la fila 'LIQUIDACIONES PAGADAS'.\n" +
-    "• Comprobante archivado en la pestaña 'HISTORIAL LIQUIDACIONES'.\n" +
-    "• En todas las listas desplegables ahora aparecerá con la etiqueta [RETIRADO].";
+  // 6. Mensaje de éxito
+  var resumenExito = "✅ ¡Liquidación aplicada con éxito!\n\n" +
+    "• Socio: " + socioNombre.toUpperCase() + "\n" +
+    "• Monto Neto Liquidado: " + formattedNeto + "\n" +
+    "• Se descontó en 'RESUMEN GENERAL' debajo de 'CAJA EFECTIVO'.\n" +
+    "• El comprobante quedó registrado en 'HISTORIAL LIQUIDACIONES'.";
     
-  ui.alert("Liquidación Completada", resumenExito, ui.ButtonSet.OK);
+  ui.alert("Liquidación Aplicada", resumenExito, ui.ButtonSet.OK);
+}
+
+/**
+ * ALIAS PARA COMPATIBILIDAD CON BOTONES PREVIOS O MENÚ
+ */
+function procesarLiquidacion() {
+  aplicarLiquidacionAResumen();
 }
