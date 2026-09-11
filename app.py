@@ -1098,7 +1098,7 @@ def load_data(url):
     df_ahorros = df_ahorros_raw[
         df_ahorros_raw['Socio'].notna() & 
         (df_ahorros_raw['Socio'].astype(str).str.strip() != '') & 
-        (~df_ahorros_raw['Socio'].astype(str).str.upper().str.contains('TOTAL'))
+        (~df_ahorros_raw['Socio'].astype(str).str.upper().str.contains('TOTAL|SUMA|MENSUAL'))
     ].copy()
         
     df_ahorros['Socio'] = df_ahorros['Socio'].astype(str).str.strip()

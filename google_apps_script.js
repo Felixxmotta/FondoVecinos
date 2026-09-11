@@ -68,7 +68,25 @@ function registrarNuevo() {
   var sheetAhorros = getSheetFlexible(ss, "CONTROL AHORRO");
   
   if (isSocioNuevo && sheetAhorros) {
-    var targetRow = sheetAhorros.getLastRow() + 1;
+    // Buscar la fila del último socio (para no escribir debajo de la fila de TOTALES)
+    var colA = sheetAhorros.getRange("A5:A" + Math.max(sheetAhorros.getLastRow(), 25)).getValues();
+    var lastSocioRow = 4;
+    var totalRowIdx = -1;
+    for (var i = 0; i < colA.length; i++) {
+      var val = (colA[i][0] || "").toString().trim().toUpperCase();
+      if (val.indexOf("TOTAL") !== -1 || val.indexOf("SUMA") !== -1) {
+        if (totalRowIdx === -1) totalRowIdx = i + 5;
+      } else if (val !== "") {
+        lastSocioRow = i + 5;
+      }
+    }
+    
+    var targetRow = lastSocioRow + 1;
+    if (totalRowIdx !== -1 && targetRow >= totalRowIdx) {
+      sheetAhorros.insertRowBefore(totalRowIdx);
+      targetRow = totalRowIdx;
+    }
+
     var now = new Date();
     var currentYear = now.getFullYear();
     var currentMonth = now.getMonth(); // 0-indexed (8 = September)
@@ -105,7 +123,7 @@ function registrarNuevo() {
     var formulaTotalAnual = "=SUM(C" + targetRow + ":AJ" + targetRow + ")";
     newSocioRow.push(formulaTotalAnual);
     
-    sheetAhorros.appendRow(newSocioRow);
+    sheetAhorros.getRange(targetRow, 1, 1, newSocioRow.length).setValues([newSocioRow]);
   }
 
   if (isCredito && monto > 0 && plazo > 0) {
