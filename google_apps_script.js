@@ -684,7 +684,7 @@ function configurarFilaLiquidacionesManual() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   asegurarHistorialLiquidaciones(ss);
   asegurarFilaLiquidacionesEnResumen(ss);
-  SpreadsheetApp.getUi().alert("Configuración Exitosa", "La fila de 'LIQUIDACIONES PAGADAS' en RESUMEN GENERAL y la pestaña 'HISTORIAL LIQUIDACIONES' han sido verificadas y configuradas correctamente.", SpreadsheetApp.getUi().ButtonSet.OK);
+  SpreadsheetApp.getUi().alert("Configuracion Exitosa: Fila de liquidaciones configurada correctamente en RESUMEN GENERAL.");
 }
 
 /**
@@ -703,7 +703,7 @@ function aplicarLiquidacionAResumen() {
   
   var sheetLiq = getSheetFlexible(ss, "LIQUIDADOR");
   if (!sheetLiq) {
-    ui.alert("⚠️ Error", "No se encontró la pestaña 'LIQUIDADOR'. Por favor verifique el nombre de la hoja.", ui.ButtonSet.OK);
+    ui.alert("Error: No se encontro la pestaña LIQUIDADOR. Verifique el nombre de la hoja.");
     return;
   }
   
@@ -712,12 +712,7 @@ function aplicarLiquidacionAResumen() {
   var netoPagar = parseFloat(valNetoRaw);
   
   if (isNaN(netoPagar) || netoPagar <= 0) {
-    ui.alert(
-      "⚠️ Celda C23 Vacía o en Cero",
-      "El valor neto a liquidar en la celda C23 es $0 o no contiene un valor numérico válido.\n\n" +
-      "Por favor defina la liquidación del socio en la pestaña LIQUIDADOR antes de presionar el botón.",
-      ui.ButtonSet.OK
-    );
+    ui.alert("Atencion: La celda C23 esta vacia o en cero. Defina la liquidacion en LIQUIDADOR antes de presionar el boton.");
     return;
   }
   
@@ -735,7 +730,7 @@ function aplicarLiquidacionAResumen() {
     fechaLiqStr = formatDateDDMMYYYY(new Date());
   }
   
-  var motivo = (sheetLiq.getRange("C6").getValue() || "").toString().trim() || "Retiro voluntario / Liquidación";
+  var motivo = (sheetLiq.getRange("C6").getValue() || "").toString().trim() || "Retiro voluntario / Liquidacion";
   var totalAportes = parseFloat(sheetLiq.getRange("C11").getValue()) || 0;
   var utilRifas = parseFloat(sheetLiq.getRange("C12").getValue()) || 0;
   var intGanados = parseFloat(sheetLiq.getRange("C13").getValue()) || 0;
@@ -744,20 +739,20 @@ function aplicarLiquidacionAResumen() {
   var formattedNeto = Utilities.formatNumber(netoPagar, "es_CO", "$#,##0");
   
   // 3. Confirmación previa en pantalla
-  var mensajeConfirmacion = "¿Desea aplicar y descontar esta liquidación en el Fondo?\n\n" +
-    "👤 Socio: " + socioNombre + "\n" +
-    "📅 Fecha: " + fechaLiqStr + "\n" +
-    "📝 Motivo: " + motivo + "\n" +
-    "💵 VALOR NETO A DESCONTAR (C23): " + formattedNeto + "\n\n" +
+  var mensajeConfirmacion = "¿Desea aplicar y descontar esta liquidacion en el Fondo?\n\n" +
+    "• Socio: " + socioNombre + "\n" +
+    "• Fecha: " + fechaLiqStr + "\n" +
+    "• Motivo: " + motivo + "\n" +
+    "• VALOR NETO A DESCONTAR (C23): " + formattedNeto + "\n\n" +
     "Efectos al confirmar:\n" +
-    "• Se archivará el comprobante en 'HISTORIAL LIQUIDACIONES'.\n" +
-    "• Se creará / actualizará la celda en 'RESUMEN GENERAL' debajo de 'CAJA EFECTIVO'.\n" +
-    "• El Total del Fondo restará este valor automáticamente.\n" +
-    "• Tus tablas de CONTROL AHORRO y préstamos no se modificarán.";
+    "1. Se archivara el comprobante en HISTORIAL LIQUIDACIONES.\n" +
+    "2. Se creara / actualizara la celda en RESUMEN GENERAL debajo de CAJA EFECTIVO.\n" +
+    "3. El Total del Fondo restara este valor automaticamente.\n" +
+    "4. Tus tablas de CONTROL AHORRO y prestamos no se modificaran.";
     
-  var respuesta = ui.alert("🔘 Confirmar Aplicación de Liquidación", mensajeConfirmacion, ui.ButtonSet.YES_NO);
+  var respuesta = ui.alert("Confirmar Aplicacion de Liquidacion", mensajeConfirmacion, ui.ButtonSet.YES_NO);
   if (respuesta !== ui.Button.YES) {
-    ui.alert("Operación Cancelada", "No se realizó ninguna modificación.", ui.ButtonSet.OK);
+    ui.alert("Operacion cancelada: No se realizo ninguna modificacion.");
     return;
   }
   
@@ -787,13 +782,13 @@ function aplicarLiquidacionAResumen() {
   asegurarFilaLiquidacionesEnResumen(ss);
   
   // 6. Mensaje de éxito
-  var resumenExito = "✅ ¡Liquidación aplicada con éxito!\n\n" +
+  var resumenExito = "Liquidacion aplicada con exito:\n\n" +
     "• Socio: " + socioNombre.toUpperCase() + "\n" +
     "• Monto Neto Liquidado: " + formattedNeto + "\n" +
-    "• Se descontó en 'RESUMEN GENERAL' debajo de 'CAJA EFECTIVO'.\n" +
-    "• El comprobante quedó registrado en 'HISTORIAL LIQUIDACIONES'.";
+    "• Se desconto en RESUMEN GENERAL debajo de CAJA EFECTIVO.\n" +
+    "• El comprobante quedo registrado en HISTORIAL LIQUIDACIONES.";
     
-  ui.alert("Liquidación Aplicada", resumenExito, ui.ButtonSet.OK);
+  ui.alert(resumenExito);
 }
 
 /**
