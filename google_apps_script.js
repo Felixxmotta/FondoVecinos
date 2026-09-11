@@ -525,8 +525,7 @@ function aplicarLiquidacionAResumen() {
   var utilRifas = parseFloat(sheetLiq.getRange("C12").getValue()) || 0;
   var intGanados = parseFloat(sheetLiq.getRange("C13").getValue()) || 0;
   var totalDeducciones = parseFloat(sheetLiq.getRange("C21").getValue()) || 0;
-  
-  var formattedNeto = Utilities.formatNumber(netoPagar, "es_CO", "$#,##0");
+  var formattedNeto = "$" + Math.round(netoPagar).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   
   // 3. Confirmación previa en pantalla
   var mensajeConfirmacion = "¿Desea aplicar y descontar esta liquidacion en el Fondo?\n\n" +
