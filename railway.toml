@@ -3,12 +3,12 @@ builder = "nixpacks"
 buildCommand = "pip install -r requirements.txt"
 
 [deploy]
-startCommand = "streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true"
+startCommand = "streamlit run app.py --server.port ${PORT:-8080} --server.address 0.0.0.0 --server.headless true"
 healthcheckPath = "/"
-healthcheckTimeout = 60
+healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
 
 [env]
 PYTHON_VERSION = "3.10"
-# Sin variables sensibles (lee Google Sheets público)
+PORT = "8080"
