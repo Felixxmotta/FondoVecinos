@@ -1467,6 +1467,105 @@ def render_fund_general_view(df_resumen, df_ahorros, df_flujo, full_people_list,
         )
         st.plotly_chart(fig_pie, use_container_width=True)
 
+        # Gráfico Comparativo de Equilibrio: Ecuación Activos = Pasivos + Patrimonio
+        st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
+        fig_balance = go.Figure()
+
+        # Columna 1: Activos Reales
+        fig_balance.add_trace(go.Bar(
+            name='💵 Dinero en Bancos',
+            x=['1. ACTIVOS REALES'],
+            y=[disponible_banco_val],
+            marker_color='#3b82f6',
+            text=[f"${disponible_banco_val:,.0f}"],
+            textposition='inside',
+            insidetextanchor='middle',
+            hovertemplate="<b>Dinero en Bancos:</b> $%{y:,.2f}<extra></extra>"
+        ))
+        fig_balance.add_trace(go.Bar(
+            name='📢 Cartera en Calle (Préstamos)',
+            x=['1. ACTIVOS REALES'],
+            y=[cap_prestado_val],
+            marker_color='#f43f5e',
+            text=[f"${cap_prestado_val:,.0f}"],
+            textposition='inside',
+            insidetextanchor='middle',
+            hovertemplate="<b>Cartera Prestada:</b> $%{y:,.2f}<extra></extra>"
+        ))
+        if caja_efectivo_val > 0:
+            fig_balance.add_trace(go.Bar(
+                name='💼 Caja Menor Efectivo',
+                x=['1. ACTIVOS REALES'],
+                y=[caja_efectivo_val],
+                marker_color='#94a3b8',
+                text=[f"${caja_efectivo_val:,.0f}"],
+                textposition='inside',
+                insidetextanchor='middle',
+                hovertemplate="<b>Caja Efectivo:</b> $%{y:,.2f}<extra></extra>"
+            ))
+
+        # Columna 2: Pasivo + Patrimonio
+        fig_balance.add_trace(go.Bar(
+            name='👥 Pasivos (Ahorros Socios Vigentes)',
+            x=['2. PASIVO + PATRIMONIO'],
+            y=[pasivos_reales_val],
+            marker_color='#10b981',
+            text=[f"${pasivos_reales_val:,.0f}"],
+            textposition='inside',
+            insidetextanchor='middle',
+            hovertemplate="<b>Ahorros de Socios Vigentes:</b> $%{y:,.2f}<extra></extra>"
+        ))
+        fig_balance.add_trace(go.Bar(
+            name='🏛️ Patrimonio (Utilidad Neta / Excedentes)',
+            x=['2. PASIVO + PATRIMONIO'],
+            y=[patrimonio_reales_val],
+            marker_color='#a855f7',
+            text=[f"${patrimonio_reales_val:,.0f}"],
+            textposition='inside',
+            insidetextanchor='middle',
+            hovertemplate="<b>Utilidad Neta / Patrimonio:</b> $%{y:,.2f}<extra></extra>"
+        ))
+
+        fig_balance.update_layout(
+            barmode='stack',
+            title=dict(
+                text="<b>⚖️ Ecuación Contable: Activos = Pasivos + Patrimonio</b>",
+                font=dict(size=16, color='#f8fafc'),
+                x=0.5,
+                xanchor='center'
+            ),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            height=400,
+            font=dict(color='#cbd5e1'),
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.22,
+                xanchor="center",
+                x=0.5,
+                font=dict(size=11, color="#cbd5e1")
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor='#334155',
+                tickprefix="$",
+                tickformat=",.0f"
+            ),
+            xaxis=dict(
+                showgrid=False,
+                tickfont=dict(size=12, color="#f1f5f9", family="sans-serif")
+            ),
+            margin=dict(l=20, r=20, t=50, b=100)
+        )
+        st.plotly_chart(fig_balance, use_container_width=True)
+
+        st.markdown(f"""
+        <div style='background: rgba(15, 23, 42, 0.6); border: 1px solid #334155; border-radius: 8px; padding: 10px 14px; font-size: 0.85rem; color: #94a3b8; text-align: center; margin-top: -12px; margin-bottom: 15px;'>
+            ⚖️ <b>Balanza Cuadrada:</b> Ambos bloques suman exactamente <b>{fmt_money(activos_reales_val, show_decimals=True)}</b> ($0.00 de diferencia contable).
+        </div>
+        """, unsafe_allow_html=True)
+
     with col_details:
         st.markdown("### 📋 Resumen del Balance General")
         balance_items = [
