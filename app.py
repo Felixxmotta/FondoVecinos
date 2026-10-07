@@ -1422,15 +1422,31 @@ def render_fund_general_view(df_resumen, df_ahorros, df_flujo, full_people_list,
     col_pie, col_details = st.columns([1, 1])
     
     with col_pie:
-        assets = ['📢 Cartera Activa (En calle)', '💵 Disponible en Banco', '💼 Caja Efectivo']
-        asset_values = [cap_prestado_val, disponible_banco_val, caja_efectivo_val]
+        dist_labels = [
+            '📢 Capital Prestado (En calle)',
+            '💵 Disponible en Banco',
+            '🤝 Liquidaciones Pagadas',
+            '🧾 Gastos Operativos'
+        ]
+        dist_values = [
+            cap_prestado_val,
+            disponible_banco_val,
+            liquidaciones_val,
+            gastos_op_val
+        ]
+        dist_colors = ['#f43f5e', '#3b82f6', '#a855f7', '#f59e0b']
+        
+        if caja_efectivo_val > 0:
+            dist_labels.append('💼 Caja Menor Efectivo')
+            dist_values.append(caja_efectivo_val)
+            dist_colors.append('#94a3b8')
         
         fig_pie = go.Figure(data=[go.Pie(
-            labels=assets,
-            values=asset_values,
+            labels=dist_labels,
+            values=dist_values,
             hole=0.55,
             marker=dict(
-                colors=['#f43f5e', '#3b82f6', '#94a3b8'],
+                colors=dist_colors,
                 line=dict(color='#1e293b', width=2)
             ),
             textinfo='percent',
@@ -1440,7 +1456,7 @@ def render_fund_general_view(df_resumen, df_ahorros, df_flujo, full_people_list,
         )])
         fig_pie.update_layout(
             title=dict(
-                text="<b>🏛️ Distribución de los Activos Reales ($23,66M)</b>",
+                text=f"<b>🏛️ Distribución del Patrimonio del Fondo ({fmt_money(fondo_total_val)})</b>",
                 font=dict(size=17, color='#f8fafc'),
                 x=0.5,
                 xanchor='center'
@@ -1459,7 +1475,7 @@ def render_fund_general_view(df_resumen, df_ahorros, df_flujo, full_people_list,
             ),
             margin=dict(l=20, r=20, t=50, b=120),
             annotations=[dict(
-                text=f"<b>ACTIVOS REALES<br>{fmt_money(activos_reales_val)}</b>",
+                text=f"<b>FONDO TOTAL<br>{fmt_money(fondo_total_val)}</b>",
                 x=0.5, y=0.5,
                 font=dict(size=12, color="#38bdf8"),
                 showarrow=False
@@ -1567,21 +1583,46 @@ def render_fund_general_view(df_resumen, df_ahorros, df_flujo, full_people_list,
         """, unsafe_allow_html=True)
 
     with col_details:
-        st.markdown("### 📋 Resumen del Balance General")
-        balance_items = [
-            {'Concepto': 'TOTAL ACTIVOS REALES', 'Valor ($)': fmt_money(activos_reales_val, show_decimals=True)},
-            {'Concepto': '• Dinero disponible en bancos', 'Valor ($)': fmt_money(disponible_banco_val, show_decimals=True)},
-            {'Concepto': '• Dinero en caja menor (efectivo)', 'Valor ($)': fmt_money(caja_efectivo_val, show_decimals=True)},
-            {'Concepto': '• Cartera activa (Capital prestado)', 'Valor ($)': fmt_money(cap_prestado_val, show_decimals=True)},
-            {'Concepto': 'TOTAL PASIVOS REALES', 'Valor ($)': fmt_money(pasivos_reales_val, show_decimals=True)},
-            {'Concepto': '• Ahorros de socios activos vigentes', 'Valor ($)': fmt_money(ahorros_activos_vigentes_val, show_decimals=True)},
-            {'Concepto': 'TOTAL PATRIMONIO (EXCEDENTES)', 'Valor ($)': fmt_money(patrimonio_reales_val, show_decimals=True)},
-            {'Concepto': '• Utilidad neta no repartida', 'Valor ($)': fmt_money(utilidad_neta_val, show_decimals=True)},
-            {'Concepto': 'Fondo Total Acumulado (Bruto)', 'Valor ($)': fmt_money(fondo_total_val, show_decimals=True)},
-            {'Concepto': 'Liquidaciones Pagadas a Retirados', 'Valor ($)': fmt_money(liquidaciones_val, show_decimals=True)},
-            {'Concepto': 'Gastos Operativos', 'Valor ($)': fmt_money(gastos_op_val, show_decimals=True)}
-        ]
-        st.dataframe(pd.DataFrame(balance_items), hide_index=True, use_container_width=True)
+        st.markdown("### 📋 Estado del Fondo de Ahorro")
+        
+        # Extraer dinámicamente el cuadro exacto B4:C14 desde RESUMEN GENERAL
+        table_rows = []
+        if df_resumen is not None and not df_resumen.empty:
+            header_idx = None
+            for r in range(len(df_resumen)):
+                val_b = str(df_resumen.iloc[r, 1]).strip().lower()
+                val_c = str(df_resumen.iloc[r, 2]).strip().lower()
+                if 'concepto' in val_b and 'valor' in val_c:
+                    header_idx = r
+                    break
+            if header_idx is not None:
+                for r in range(header_idx + 1, len(df_resumen)):
+                    c_name = str(df_resumen.iloc[r, 1]).strip()
+                    c_val = df_resumen.iloc[r, 2]
+                    if not c_name or c_name.lower() in ['nan', 'none', ''] or 'total activos del fondo' in c_name.lower():
+                        break
+                    try:
+                        num = float(c_val)
+                        formatted_num = fmt_money(num, show_decimals=True)
+                    except (ValueError, TypeError):
+                        formatted_num = str(c_val)
+                    table_rows.append({'Concepto': c_name, 'Valor ($)': formatted_num})
+        
+        if not table_rows:
+            table_rows = [
+                {'Concepto': 'TOTAL AHORROS SOCIOS', 'Valor ($)': fmt_money(tot_ahorros_val, show_decimals=True)},
+                {'Concepto': 'TOTAL INTERESES GANADOS (COBRADOS)', 'Valor ($)': fmt_money(int_ganados_val, show_decimals=True)},
+                {'Concepto': 'UTILIDAD DE EVENTOS/RIFAS', 'Valor ($)': fmt_money(util_eventos_val, show_decimals=True)},
+                {'Concepto': 'FONDO TOTAL ACUMULADO', 'Valor ($)': fmt_money(fondo_total_val, show_decimals=True)},
+                {'Concepto': 'CAPITAL PRESTADO (EN CALLE)', 'Valor ($)': fmt_money(cap_prestado_val, show_decimals=True)},
+                {'Concepto': 'GASTOS OPERATIVOS', 'Valor ($)': fmt_money(gastos_op_val, show_decimals=True)},
+                {'Concepto': 'TOTAL', 'Valor ($)': fmt_money(fondo_total_val - cap_prestado_val - gastos_op_val, show_decimals=True)},
+                {'Concepto': 'CAJA EFECTIVO', 'Valor ($)': fmt_money(caja_efectivo_val, show_decimals=True)},
+                {'Concepto': 'LIQUIDACIONES PAGADAS (SOCIOS RETIRADOS)', 'Valor ($)': fmt_money(liquidaciones_val, show_decimals=True)},
+                {'Concepto': 'EN BANCO', 'Valor ($)': fmt_money(disponible_banco_val, show_decimals=True)}
+            ]
+            
+        st.dataframe(pd.DataFrame(table_rows), hide_index=True, use_container_width=True)
         
         total_active_loans_amt = cap_prestado_val
         total_active_loans_count = len(df_flujo[active_loans_mask])
