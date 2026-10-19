@@ -749,11 +749,10 @@ function actualizarAmortizacionesAnteriores() {
       
       var endPay = r + 2;
       while (endPay < amortValues.length) {
-        var vCuota = amortValues[endPay][1];
         var vColA = String(amortValues[endPay][0] || "").trim();
-        var vCuotaStr = String(vCuota || "").trim().toUpperCase();
-        if (vCuota === "" || vCuota === null || vCuota === undefined ||
-            vColA.indexOf("#") === 0 || vCuotaStr === "CUOTA") {
+        var vCuotaVal = amortValues[endPay][1];
+        var vCuotaStr = String(vCuotaVal !== null && vCuotaVal !== undefined ? vCuotaVal : "").trim().toUpperCase();
+        if (vCuotaStr === "" || vColA.indexOf("#") === 0 || vCuotaStr === "CUOTA") {
           break;
         }
         endPay++;
