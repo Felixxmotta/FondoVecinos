@@ -572,6 +572,24 @@ st.markdown("""
         background: #334155;
         color: white !important;
     }
+    .btn-wa-fund {
+        display: block;
+        text-align: center;
+        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        color: white !important;
+        padding: 9px 14px;
+        border-radius: 8px;
+        font-weight: 700;
+        text-decoration: none !important;
+        font-size: 0.90rem;
+        box-shadow: 0 2px 10px rgba(37, 99, 235, 0.35);
+        transition: all 0.2s ease;
+    }
+    .btn-wa-fund:hover {
+        background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+        box-shadow: 0 4px 14px rgba(37, 99, 235, 0.5);
+        color: white !important;
+    }
     .dispatch-item-card {
         background: rgba(30, 41, 59, 0.65);
         border: 1px solid rgba(255, 255, 255, 0.09);
@@ -591,6 +609,8 @@ def fmt_money(val, show_decimals=False):
         return "$ 0"
     try:
         v = float(val)
+        if abs(v) < 0.01:
+            v = 0.0
         if show_decimals:
             formatted = f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             return f"$ {formatted}"
@@ -1008,22 +1028,59 @@ def get_phone_for_person(person_name, df_whatsapp):
         return clean_phone(val)
     return None
 
-def generate_whatsapp_message(selected_person, user_type_label, user_status_eval, total_savings, base_savings, active_loans_count, total_loan_balance, user_loans, df_resumen, df_ahorros, df_flujo):
+def get_amort_table_for_loan(loan, amort_tables, selected_person, df_flujo=None, idx=0):
+    if not amort_tables:
+        return None
+    try:
+        loan_id = int(loan['ID']) if 'ID' in loan and not pd.isna(loan['ID']) else None
+    except (ValueError, TypeError):
+        loan_id = None
+
+    loan_person_name = str(loan.get('Nombre', selected_person)).strip().upper()
+    clean_person_name = normalize_name(loan_person_name)
+    loan_monto = float(loan.get('Monto', 0)) if pd.notna(loan.get('Monto')) else 0.0
+    loan_total_pagar = float(loan.get('Total a Pagar', 0)) if pd.notna(loan.get('Total a Pagar')) else 0.0
+
+    flujo_loan_idx = None
+    try:
+        if df_flujo is not None and loan_id is not None and len(df_flujo[df_flujo['ID'] == loan_id]) > 0:
+            flujo_loan_idx = int(df_flujo[df_flujo['ID'] == loan_id].index[0]) + 1
+    except Exception:
+        flujo_loan_idx = None
+
+    matched_table = None
+    # 1. Match by explicit ID in block header
+    if loan_id is not None and loan_id in amort_tables:
+        candidate = amort_tables[loan_id]
+        if candidate.get('extracted_id') == loan_id or not candidate.get('clean_name') or candidate.get('clean_name') == clean_person_name:
+            matched_table = candidate
+
+    # 2. Match by normalized name + closest balance matching Monto or Total a Pagar
+    if matched_table is None and clean_person_name and '_all_blocks' in amort_tables:
+        candidate_blocks = [t for t in amort_tables['_all_blocks'] if t.get('clean_name') == clean_person_name]
+        if candidate_blocks:
+            matched_table = min(candidate_blocks, key=lambda t: min(
+                abs(t.get('initial_balance', 0.0) - loan_monto),
+                abs(t.get('initial_balance', 0.0) - loan_total_pagar)
+            ))
+
+    # 3. Match by clean_person_name directly or by sequential index
+    if matched_table is None and clean_person_name and clean_person_name in amort_tables:
+        matched_table = amort_tables[clean_person_name]
+    elif matched_table is None and loan_person_name in amort_tables:
+        matched_table = amort_tables[loan_person_name]
+    elif matched_table is None and flujo_loan_idx is not None and flujo_loan_idx in amort_tables:
+        candidate = amort_tables[flujo_loan_idx]
+        if not candidate.get('clean_name') or candidate.get('clean_name') == clean_person_name:
+            matched_table = candidate
+    elif matched_table is None and (idx + 1) in amort_tables and not clean_person_name:
+        matched_table = amort_tables[idx + 1]
+
+    return matched_table
+
+def generate_whatsapp_message(selected_person, user_type_label, user_status_eval, total_savings, base_savings, active_loans_count, total_loan_balance, user_loans, df_resumen, df_ahorros, df_flujo, amort_tables=None):
     status_str = "🟢 AL DÍA" if user_status_eval['overall_status'] == 'AL_DIA' else ("⚪ RETIRADO" if user_status_eval['overall_status'] == 'RETIRADO' else "🔴 INACTIVO / MORA")
     today_str = datetime.date.today().strftime('%d/%m/%Y')
-    
-    # Calculate general fund metrics
-    metrics = parse_fund_metrics(df_resumen)
-    tot_ahorros_val = metrics['tot_ahorros_val']
-    int_ganados_val = metrics['int_ganados_val']
-    util_eventos_val = metrics['util_eventos_val']
-    fondo_total_val = metrics['fondo_total_val']
-    cap_prestado_val = metrics['cap_prestado_val']
-    gastos_op_val = metrics['gastos_op_val']
-    disponible_banco_val = metrics['disponible_banco_val']
-    caja_efectivo_val = metrics['caja_efectivo_val']
-    liquidaciones_val = metrics.get('liquidaciones_val', 0.0)
-    total_disponible_val = disponible_banco_val + caja_efectivo_val
 
     msg = f"📅 *Fecha:* {today_str}\n"
     msg += f"-----------------------------------------\n"
@@ -1089,7 +1146,65 @@ def generate_whatsapp_message(selected_person, user_type_label, user_status_eval
             msg += f"    - Saldo Pendiente: {fmt_money(saldo, show_decimals=True)}\n"
             msg += f"    - Estado: {estado}\n"
 
-    msg += f"\n📊 *ESTADO GENERAL DEL FONDO:*\n"
+        # Tablas de amortización detalladas correspondientes (reemplaza el Estado General del Fondo)
+        if amort_tables:
+            target_loans = [
+                (idx_l, l) for idx_l, l in enumerate(user_loans)
+                if 'ACTIVO' in str(l.get('Estado del credito', l.get('Estado', ''))).upper() or float(l.get('Saldo Pendiente', 0) or 0) > 0
+            ]
+            if not target_loans:
+                target_loans = list(enumerate(user_loans))
+
+            for idx_l, l in target_loans:
+                loan_id = l.get('ID', '')
+                t = get_amort_table_for_loan(l, amort_tables, selected_person, df_flujo, idx_l)
+                if t and 'schedule' in t and not t['schedule'].empty:
+                    sched = t['schedule']
+                    msg += f"\n📈 *TABLA DE AMORTIZACIÓN (Crédito ID #{loan_id}):*\n"
+                    for row_i, r_item in sched.iterrows():
+                        f_lbl = str(r_item.get('Cuota / Fecha', '')).strip()
+                        c_val = r_item.get('Valor Cuota')
+                        k_val = r_item.get('Abono a Capital')
+                        i_val = r_item.get('Intereses')
+                        s_val = r_item.get('Saldo Pendiente')
+                        if row_i == 0 or pd.isna(c_val) or c_val == 0:
+                            s_num = float(s_val or 0)
+                            msg += f"• *Desembolso* ({f_lbl}): Saldo = {fmt_money(s_num)}\n"
+                        else:
+                            c_num = float(c_val or 0)
+                            k_num = float(k_val or 0)
+                            i_num = float(i_val or 0)
+                            s_num = float(s_val or 0)
+                            msg += f"• *Cuota {row_i}* ({f_lbl}):\n"
+                            msg += f"   - Cuota: {fmt_money(c_num, show_decimals=True)}\n"
+                            msg += f"   - Abono K: {fmt_money(k_num, show_decimals=True)} | Interés: {fmt_money(i_num, show_decimals=True)}\n"
+                            msg += f"   - Saldo Restante: {fmt_money(s_num, show_decimals=True)}\n"
+
+    msg += f"\n-----------------------------------------\n"
+    msg += f"_Fondo de Vecinos - Gestión Transparente_"
+    return msg
+
+def generate_whatsapp_fund_message(df_resumen, recipient_name=None):
+    today_str = datetime.date.today().strftime('%d/%m/%Y')
+    metrics = parse_fund_metrics(df_resumen)
+    tot_ahorros_val = metrics['tot_ahorros_val']
+    int_ganados_val = metrics['int_ganados_val']
+    util_eventos_val = metrics['util_eventos_val']
+    fondo_total_val = metrics['fondo_total_val']
+    cap_prestado_val = metrics['cap_prestado_val']
+    gastos_op_val = metrics['gastos_op_val']
+    disponible_banco_val = metrics['disponible_banco_val']
+    caja_efectivo_val = metrics['caja_efectivo_val']
+    liquidaciones_val = metrics.get('liquidaciones_val', 0.0)
+    total_disponible_val = disponible_banco_val + caja_efectivo_val
+
+    msg = f"📅 *Fecha:* {today_str}\n"
+    msg += f"-----------------------------------------\n"
+    msg += f"🏛️ *FONDO DE AHORRO AMIGOS DE LA MESA*\n"
+    msg += f"📊 *ESTADO GENERAL DEL FONDO*\n"
+    if recipient_name:
+        msg += f"👤 *Destinatario:* {recipient_name}\n"
+    msg += f"-----------------------------------------\n"
     msg += f"• Total Ahorros Socios: {fmt_money(tot_ahorros_val)}\n"
     msg += f"• Total Intereses Ganados (cobrados): {fmt_money(int_ganados_val, show_decimals=True)}\n"
     msg += f"• Utilidad de Eventos/Rifas: {fmt_money(util_eventos_val)}\n"
@@ -1100,13 +1215,12 @@ def generate_whatsapp_message(selected_person, user_type_label, user_status_eval
         msg += f"• Liquidaciones Pagadas a Retirados: {fmt_money(liquidaciones_val, show_decimals=True)}\n"
     msg += f"• En Banco: {fmt_money(disponible_banco_val, show_decimals=True)}\n"
     msg += f"• Caja Efectivo: {fmt_money(caja_efectivo_val)}\n"
-    msg += f"• Total: {fmt_money(total_disponible_val, show_decimals=True)}\n"
-
-    msg += f"\n-----------------------------------------\n"
+    msg += f"• Total Disponible: {fmt_money(total_disponible_val, show_decimals=True)}\n"
+    msg += f"-----------------------------------------\n"
     msg += f"_Fondo de Vecinos - Gestión Transparente_"
     return msg
 
-def compute_person_financials(person_name, df_ahorros, df_flujo, df_whatsapp, socios_list, df_resumen, df_liquidaciones=None):
+def compute_person_financials(person_name, df_ahorros, df_flujo, df_whatsapp, socios_list, df_resumen, df_liquidaciones=None, amort_tables=None):
     norm_selected = normalize_name(person_name)
     user_loans = df_flujo[df_flujo['NormalizedNombre'] == norm_selected].to_dict('records')
     total_loan_balance = sum(loan['Saldo Pendiente'] for loan in user_loans if not pd.isna(loan['Saldo Pendiente']))
@@ -1133,18 +1247,29 @@ def compute_person_financials(person_name, df_ahorros, df_flujo, df_whatsapp, so
         
     phone_num = get_phone_for_person(person_name, df_whatsapp)
     
+    # Mensaje 1: Estado de Cuenta Individual (con Tabla de Amortización)
     wa_msg = generate_whatsapp_message(
         person_name, user_type_label, user_status_eval,
         total_savings, base_savings, active_loans_count, total_loan_balance,
-        user_loans, df_resumen, df_ahorros, df_flujo
+        user_loans, df_resumen, df_ahorros, df_flujo, amort_tables=amort_tables
     )
     encoded_wa_msg = urllib.parse.quote(wa_msg)
     if phone_num:
         wa_url = f"https://api.whatsapp.com/send?phone={phone_num}&text={encoded_wa_msg}"
-        btn_wa_label = f"📲 Enviar Resumen a {person_name} (+{phone_num})"
+        btn_wa_label = f"📲 Enviar Estado de Cuenta a {person_name} (+{phone_num})"
     else:
         wa_url = f"https://api.whatsapp.com/send?text={encoded_wa_msg}"
-        btn_wa_label = f"📲 Enviar Resumen por WhatsApp (Elegir Contacto)"
+        btn_wa_label = f"📲 Enviar Estado de Cuenta (Elegir Contacto)"
+
+    # Mensaje 2: Estado General del Fondo (Opcional)
+    wa_fund_msg = generate_whatsapp_fund_message(df_resumen, recipient_name=person_name)
+    encoded_wa_fund_msg = urllib.parse.quote(wa_fund_msg)
+    if phone_num:
+        wa_fund_url = f"https://api.whatsapp.com/send?phone={phone_num}&text={encoded_wa_fund_msg}"
+        btn_wa_fund_label = f"📊 Enviar Estado General del Fondo a {person_name} (+{phone_num})"
+    else:
+        wa_fund_url = f"https://api.whatsapp.com/send?text={encoded_wa_fund_msg}"
+        btn_wa_fund_label = f"📊 Enviar Estado General del Fondo (Elegir Contacto)"
         
     return {
         'person_name': person_name,
@@ -1163,7 +1288,11 @@ def compute_person_financials(person_name, df_ahorros, df_flujo, df_whatsapp, so
         'wa_msg': wa_msg,
         'encoded_wa_msg': encoded_wa_msg,
         'wa_url': wa_url,
-        'btn_wa_label': btn_wa_label
+        'btn_wa_label': btn_wa_label,
+        'wa_fund_msg': wa_fund_msg,
+        'encoded_wa_fund_msg': encoded_wa_fund_msg,
+        'wa_fund_url': wa_fund_url,
+        'btn_wa_fund_label': btn_wa_fund_label
     }
 
 # Load Data from Google Sheet
@@ -1686,7 +1815,7 @@ def render_fund_general_view(df_resumen, df_ahorros, df_flujo, full_people_list,
             else:
                 st.info("No hay socios retirados registrados.")
 
-def render_home_page(df_resumen, df_ahorros, df_flujo, df_whatsapp, full_people_list, socios_list, df_liquidaciones=None):
+def render_home_page(df_resumen, df_ahorros, df_flujo, df_whatsapp, full_people_list, socios_list, df_liquidaciones=None, amort_tables=None):
     today_str = datetime.date.today().strftime('%d/%m/%Y')
     
     # 1. Hero Welcome Banner
@@ -1721,7 +1850,7 @@ def render_home_page(df_resumen, df_ahorros, df_flujo, df_whatsapp, full_people_
         
         # Precompute all participants data
         all_participants_data = [
-            compute_person_financials(p, df_ahorros, df_flujo, df_whatsapp, socios_list, df_resumen, df_liquidaciones)
+            compute_person_financials(p, df_ahorros, df_flujo, df_whatsapp, socios_list, df_resumen, df_liquidaciones, amort_tables=amort_tables)
             for p in full_people_list
         ]
         
@@ -1808,29 +1937,48 @@ def render_home_page(df_resumen, df_ahorros, df_flujo, df_whatsapp, full_people_
             """
             st.markdown(card_html, unsafe_allow_html=True)
             
-            row_col1, row_col2, row_col3 = st.columns([2, 1, 1])
+            row_col1, row_col2, row_col3, row_col4 = st.columns([1.8, 1.8, 1.1, 0.9])
+            first_name = p_name.split()[0]
             with row_col1:
-                first_name = p_name.split()[0]
                 if phone:
-                    btn_html = f"""
+                    btn1_html = f"""
                     <a href="{d['wa_url']}" target="_blank" class="btn-wa-direct">
-                        📲 Enviar WhatsApp a {first_name} (+{phone})
+                        📲 1. Estado Cuenta ({first_name})
                     </a>
                     """
                 else:
-                    btn_html = f"""
+                    btn1_html = f"""
                     <a href="{d['wa_url']}" target="_blank" class="btn-wa-secondary">
-                        📲 Enviar WhatsApp (Elegir Contacto)
+                        📲 1. Estado Cuenta (Elegir)
                     </a>
                     """
-                st.markdown(btn_html, unsafe_allow_html=True)
-                
+                st.markdown(btn1_html, unsafe_allow_html=True)
+
             with row_col2:
-                with st.expander("👁️ Ver Mensaje"):
-                    st.text_area("Texto listo:", d['wa_msg'], height=130, key=f"prev_msg_{d['norm_selected']}")
-                    
+                if phone:
+                    btn2_html = f"""
+                    <a href="{d['wa_fund_url']}" target="_blank" class="btn-wa-fund">
+                        📊 2. Estado Fondo (Opcional)
+                    </a>
+                    """
+                else:
+                    btn2_html = f"""
+                    <a href="{d['wa_fund_url']}" target="_blank" class="btn-wa-secondary">
+                        📊 2. Estado Fondo (Elegir)
+                    </a>
+                    """
+                st.markdown(btn2_html, unsafe_allow_html=True)
+                
             with row_col3:
-                if st.button("🔍 Ver Ficha", key=f"go_btn_{d['norm_selected']}", use_container_width=True):
+                with st.expander("👁️ Ver Textos"):
+                    tab_v1, tab_v2 = st.tabs(["👤 Cuenta", "📊 Fondo"])
+                    with tab_v1:
+                        st.text_area("Estado individual + amortización:", d['wa_msg'], height=130, key=f"prev_msg_{d['norm_selected']}")
+                    with tab_v2:
+                        st.text_area("Estado general del fondo:", d['wa_fund_msg'], height=130, key=f"prev_fund_{d['norm_selected']}")
+                    
+            with row_col4:
+                if st.button("🔍 Ficha", key=f"go_btn_{d['norm_selected']}", use_container_width=True):
                     st.session_state['nav_mode'] = "👤 Consulta Individual"
                     st.session_state['selected_person_select'] = p_name
                     st.rerun()
@@ -1838,11 +1986,19 @@ def render_home_page(df_resumen, df_ahorros, df_flujo, df_whatsapp, full_people_
             st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
             
         with st.expander("📋 Ver y Copiar Todos los Mensajes de una Sola Vez (Lista Completa)", expanded=False):
-            all_text_concat = "\n\n=========================================\n\n".join([
-                f"👤 DESTINATARIO: {d['person_name']} (Tel: {d['phone_num'] or 'No registrado'})\n\n{d['wa_msg']}"
-                for d in filtered_data
-            ])
-            st.text_area("Todos los mensajes formateados:", all_text_concat, height=300)
+            tab_all_ind, tab_all_fund = st.tabs(["👤 1. Estados de Cuenta Individuales (con Amortización)", "📊 2. Estados Generales del Fondo (Opcional)"])
+            with tab_all_ind:
+                all_text_concat = "\n\n=========================================\n\n".join([
+                    f"👤 DESTINATARIO: {d['person_name']} (Tel: {d['phone_num'] or 'No registrado'})\n\n{d['wa_msg']}"
+                    for d in filtered_data
+                ])
+                st.text_area("Todos los mensajes individuales formateados:", all_text_concat, height=300, key="all_msgs_ind")
+            with tab_all_fund:
+                all_fund_concat = "\n\n=========================================\n\n".join([
+                    f"👤 DESTINATARIO: {d['person_name']} (Tel: {d['phone_num'] or 'No registrado'})\n\n{d['wa_fund_msg']}"
+                    for d in filtered_data
+                ])
+                st.text_area("Todos los informes de estado del fondo formateados:", all_fund_concat, height=300, key="all_msgs_fund")
             
     with home_tab_fund:
         render_fund_general_view(df_resumen, df_ahorros, df_flujo, full_people_list, df_liquidaciones)
@@ -1891,15 +2047,24 @@ def render_individual_page(selected_person, df_resumen, df_ahorros, df_flujo, df
         wa_msg = generate_whatsapp_message(
             selected_person, user_type_label, user_status_eval, 
             total_savings, base_savings, active_loans_count, total_loan_balance, 
-            user_loans, df_resumen, df_ahorros, df_flujo
+            user_loans, df_resumen, df_ahorros, df_flujo, amort_tables=amort_tables
         )
         encoded_wa_msg = urllib.parse.quote(wa_msg)
         if phone_num:
             wa_url = f"https://api.whatsapp.com/send?phone={phone_num}&text={encoded_wa_msg}"
-            btn_wa_label = f"📲 Enviar Resumen a {selected_person} (+{phone_num})"
+            btn_wa_label = f"📲 Enviar Estado de Cuenta a {selected_person} (+{phone_num})"
         else:
             wa_url = f"https://api.whatsapp.com/send?text={encoded_wa_msg}"
-            btn_wa_label = f"📲 Enviar Resumen por WhatsApp (Elegir Contacto)"
+            btn_wa_label = f"📲 Enviar Estado de Cuenta por WhatsApp (Elegir Contacto)"
+
+        wa_fund_msg = generate_whatsapp_fund_message(df_resumen, recipient_name=selected_person)
+        encoded_wa_fund_msg = urllib.parse.quote(wa_fund_msg)
+        if phone_num:
+            wa_fund_url = f"https://api.whatsapp.com/send?phone={phone_num}&text={encoded_wa_fund_msg}"
+            btn_wa_fund_label = f"📊 Enviar Estado General del Fondo a {selected_person} (+{phone_num})"
+        else:
+            wa_fund_url = f"https://api.whatsapp.com/send?text={encoded_wa_fund_msg}"
+            btn_wa_fund_label = f"📊 Enviar Estado General del Fondo (Elegir Contacto)"
 
         # Display WhatsApp Action Card with 2 Options
         st.markdown(f"""
@@ -1916,9 +2081,29 @@ def render_individual_page(selected_person, df_resumen, df_ahorros, df_flujo, df
         wa_tab_text, wa_tab_img = st.tabs(["📝 Opción 1: Enviar como Texto", "📸 Opción 2: Enviar Pantallazo (Imágenes)"])
 
         with wa_tab_text:
-            st.link_button(btn_wa_label, wa_url, use_container_width=True)
-            with st.expander("👁️ Ver texto sin encabezado ni link (Listo para enviar)"):
-                st.code(wa_msg, language="markdown")
+            subtab_ind, subtab_fund = st.tabs([
+                "👤 Mensaje 1: Estado Individual (con Amortización)", 
+                "📊 Mensaje 2: Estado General del Fondo (Opcional)"
+            ])
+            with subtab_ind:
+                st.markdown("""
+                <div style='background: rgba(16, 185, 129, 0.08); border-left: 3px solid #10b981; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 0.85rem; color: #cbd5e1;'>
+                    📌 <b>Mensaje Personalizado:</b> Incluye ahorros, créditos vigentes y tabla de amortización detallada. Se ha retirado el Estado General del Fondo por privacidad.
+                </div>
+                """, unsafe_allow_html=True)
+                st.link_button(btn_wa_label, wa_url, use_container_width=True)
+                with st.expander("👁️ Ver texto listo para enviar (Estado Individual + Amortización)", expanded=False):
+                    st.code(wa_msg, language="markdown")
+
+            with subtab_fund:
+                st.markdown("""
+                <div style='background: rgba(59, 130, 246, 0.08); border-left: 3px solid #3b82f6; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 0.85rem; color: #cbd5e1;'>
+                    📌 <b>Informe Global Opcional:</b> Cuadro completo de balances del Fondo (Total ahorrado, intereses cobrados, bancos, etc.).
+                </div>
+                """, unsafe_allow_html=True)
+                st.link_button(btn_wa_fund_label, wa_fund_url, use_container_width=True)
+                with st.expander("👁️ Ver texto listo para enviar (Estado General del Fondo)", expanded=False):
+                    st.code(wa_fund_msg, language="markdown")
 
         with wa_tab_img:
             # Generate 1-click downloadable PNG card image
@@ -2196,51 +2381,7 @@ def render_individual_page(selected_person, df_resumen, df_ahorros, df_flujo, df
 
                     # Amortization Table Summary
                     st.markdown("<h4 style='margin-top: 18px;'>📑 Tabla de Amortización (Control de Cuotas)</h4>", unsafe_allow_html=True)
-                    try:
-                        loan_id = int(loan['ID']) if 'ID' in loan and not pd.isna(loan['ID']) else None
-                    except (ValueError, TypeError):
-                        loan_id = None
-
-                    loan_person_name = str(loan.get('Nombre', selected_person)).strip().upper()
-                    clean_person_name = normalize_name(loan_person_name)
-                    loan_monto = float(loan.get('Monto', 0)) if pd.notna(loan.get('Monto')) else 0.0
-                    loan_total_pagar = float(loan.get('Total a Pagar', 0)) if pd.notna(loan.get('Total a Pagar')) else 0.0
-
-                    # Compute sequential loan index for this row in df_flujo
-                    flujo_loan_idx = None
-                    try:
-                        # Find 1-based row index in df_flujo
-                        flujo_loan_idx = int(df_flujo[df_flujo['ID'] == loan_id].index[0]) + 1 if loan_id is not None and len(df_flujo[df_flujo['ID'] == loan_id]) > 0 else None
-                    except Exception:
-                        flujo_loan_idx = None
-
-                    matched_table = None
-                    # 1. Match by explicit ID in block header
-                    if loan_id is not None and loan_id in amort_tables:
-                        candidate = amort_tables[loan_id]
-                        if candidate.get('extracted_id') == loan_id or not candidate.get('clean_name') or candidate.get('clean_name') == clean_person_name:
-                            matched_table = candidate
-
-                    # 2. Match by normalized name + closest balance matching Monto or Total a Pagar
-                    if matched_table is None and clean_person_name and '_all_blocks' in amort_tables:
-                        candidate_blocks = [t for t in amort_tables['_all_blocks'] if t.get('clean_name') == clean_person_name]
-                        if candidate_blocks:
-                            matched_table = min(candidate_blocks, key=lambda t: min(
-                                abs(t.get('initial_balance', 0.0) - loan_monto),
-                                abs(t.get('initial_balance', 0.0) - loan_total_pagar)
-                            ))
-
-                    # 3. Match by clean_person_name directly or by sequential index
-                    if matched_table is None and clean_person_name and clean_person_name in amort_tables:
-                        matched_table = amort_tables[clean_person_name]
-                    elif matched_table is None and loan_person_name in amort_tables:
-                        matched_table = amort_tables[loan_person_name]
-                    elif matched_table is None and flujo_loan_idx is not None and flujo_loan_idx in amort_tables:
-                        candidate = amort_tables[flujo_loan_idx]
-                        if not candidate.get('clean_name') or candidate.get('clean_name') == clean_person_name:
-                            matched_table = candidate
-                    elif matched_table is None and (idx + 1) in amort_tables and not clean_person_name:
-                        matched_table = amort_tables[idx + 1]
+                    matched_table = get_amort_table_for_loan(loan, amort_tables, selected_person, df_flujo, idx)
 
                     if matched_table:
                         schedule_df = matched_table['schedule'].copy()
@@ -2357,7 +2498,7 @@ if data_loaded:
             label_visibility="collapsed"
         )
         
-        person_info = compute_person_financials(selected_person, df_ahorros, df_flujo, df_whatsapp, socios_list, df_resumen, df_liquidaciones)
+        person_info = compute_person_financials(selected_person, df_ahorros, df_flujo, df_whatsapp, socios_list, df_resumen, df_liquidaciones, amort_tables=amort_tables)
         st.sidebar.markdown(f"<div style='text-align: center; margin-top: 10px; display: flex; flex-direction: column; gap: 6px; align-items: center;'><span class='{person_info['user_badge_class']}'>{person_info['user_type_label']}</span>{person_info['user_status_eval']['overall_badge']}</div>", unsafe_allow_html=True)
     else:
         selected_person = full_people_list[0] if full_people_list else ""
@@ -2378,7 +2519,7 @@ if data_loaded:
         
         
     if nav_mode == "🏠 Inicio y Resumen General":
-        render_home_page(df_resumen, df_ahorros, df_flujo, df_whatsapp, full_people_list, socios_list, df_liquidaciones)
+        render_home_page(df_resumen, df_ahorros, df_flujo, df_whatsapp, full_people_list, socios_list, df_liquidaciones, amort_tables=amort_tables)
     else:
         render_individual_page(selected_person, df_resumen, df_ahorros, df_flujo, df_whatsapp, amort_tables, full_people_list, socios_list, df_liquidaciones)
 
