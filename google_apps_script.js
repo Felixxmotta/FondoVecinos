@@ -3,11 +3,14 @@
  * 
  * Novedades:
  * 1. Columna K ("Saldo Pendiente"): Fórmula (=I{fila}-J{fila})
- * 2. Columna L ("Estado del credito"): Fórmula automática (=IF(ISBLANK(A{fila}), "", IF(K{fila}<=5, "Cancelado", "Activo")))
- *    - Si el saldo pendiente es <= $5 pesos (redondeo/centavos), cambia a "Cancelado" y se pinta GRIS (#e2e8f0).
- *    - Si el saldo pendiente es > $5 pesos, se mantiene en "Activo" y se pinta VERDE (#d1fae5).
+ * 2. Columna L ("Estado del credito"): Fórmula automática
+ *    (=IF(ISBLANK(A{fila}), "", IF(K{fila}<=5, "Cancelado", "Activo")))
+ *    - Si saldo pendiente <= $5 pesos, cambia a "Cancelado" y se pinta GRIS (#e2e8f0).
+ *    - Si saldo pendiente > $5 pesos, se mantiene en "Activo" y se pinta VERDE (#d1fae5).
  * 3. Columna M ("Intereses Cobrados"): Fórmula inteligente
  *    (=IF(OR(REGEXMATCH(UPPER(L{fila}), "CANCEL|PAGAD|FINALIZ"), K{fila}<=5), H{fila}, 0))
+ * 4. Tablas de Amortización: Sistema Francés Dinámico
+ *    (intereses sobre saldo de capital y saldo inicial = monto prestado desembolsado).
  */
 
 /**
@@ -23,7 +26,9 @@ function getSheetFlexible(ss, targetName) {
   }
   for (var i = 0; i < sheets.length; i++) {
     var sName = sheets[i].getName().trim().toUpperCase();
-    if (sName.indexOf(targetUpper) !== -1 || targetUpper.indexOf(sName) !== -1) return sheets[i];
+    if (sName.indexOf(targetUpper) !== -1 || targetUpper.indexOf(sName) !== -1) {
+      return sheets[i];
+    }
   }
   return null;
 }
@@ -53,7 +58,8 @@ function registrarNuevo() {
     return;
   }
   
-  var isCredito = (opcionRaw.toLowerCase().indexOf("credito") !== -1 || opcionRaw.toLowerCase().indexOf("crédito") !== -1);
+  var isCredito = (opcionRaw.toLowerCase().indexOf("credito") !== -1 || 
+                   opcionRaw.toLowerCase().indexOf("crédito") !== -1);
   var isSocioNuevo = (opcionRaw.toLowerCase().indexOf("socio") !== -1);
   
   if (!isCredito && !isSocioNuevo) {
@@ -69,7 +75,8 @@ function registrarNuevo() {
   
   if (isSocioNuevo && sheetAhorros) {
     // Buscar la fila del último socio (para no escribir debajo de la fila de TOTALES)
-    var colA = sheetAhorros.getRange("A5:A" + Math.max(sheetAhorros.getLastRow(), 25)).getValues();
+    var maxRowAhorros = Math.max(sheetAhorros.getLastRow(), 25);
+    var colA = sheetAhorros.getRange("A5:A" + maxRowAhorros).getValues();
     var lastSocioRow = 4;
     var totalRowIdx = -1;
     for (var i = 0; i < colA.length; i++) {
@@ -134,7 +141,9 @@ function registrarNuevo() {
       nextId = (!isNaN(lastIdVal) && lastIdVal !== "") ? parseInt(lastIdVal) + 1 : lastRowFlujo;
     }
     
-    var cuotaFija = (tasaDecimal > 0) ? (monto * tasaDecimal) / (1 - Math.pow(1 + tasaDecimal, -plazo)) : (monto / plazo);
+    var cuotaFija = (tasaDecimal > 0)
+      ? (monto * tasaDecimal) / (1 - Math.pow(1 + tasaDecimal, -plazo))
+      : (monto / plazo);
     cuotaFija = Math.round(cuotaFija * 100) / 100;
     
     var totalAPagar = Math.round((cuotaFija * plazo) * 100) / 100;
@@ -144,10 +153,12 @@ function registrarNuevo() {
     var targetRow = lastRowFlujo + 1;
     
     var formulaSaldoPendiente = "=I" + targetRow + "-J" + targetRow;
-    var formulaEstadoCredito  = '=IF(ISBLANK(A' + targetRow + '), "", IF(K' + targetRow + '<=5, "Cancelado", "Activo"))';
+    var formulaEstadoCredito = '=IF(ISBLANK(A' + targetRow + '), "", IF(K' +
+      targetRow + '<=5, "Cancelado", "Activo"))';
     var condCancel = 'REGEXMATCH(UPPER(L' + targetRow + '), "CANCEL|PAGAD|FINALIZ")';
     var condSaldoK = 'AND(ISNUMBER(K' + targetRow + '), K' + targetRow + '<=5)';
-    var formulaInteresCobrado = '=IF(ISBLANK(A' + targetRow + '), "", IF(OR(' + condCancel + ', ' + condSaldoK + '), H' + targetRow + ', 0))';
+    var formulaInteresCobrado = '=IF(ISBLANK(A' + targetRow + '), "", IF(OR(' +
+      condCancel + ', ' + condSaldoK + '), H' + targetRow + ', 0))';
     
     var nuevaFilaFlujo = [
       nextId, nombre, tipo, monto, tasaDecimal, plazo,
@@ -162,7 +173,10 @@ function registrarNuevo() {
       if (lastRowAmort > 1) {
         sheetAmort.appendRow([" ", " ", " ", " ", " "]);
         var blankRowIdx = sheetAmort.getLastRow();
-        sheetAmort.getRange(blankRowIdx, 1, 1, 5).clearFormat().setBackground(null).setFontColor("#ffffff");
+        sheetAmort.getRange(blankRowIdx, 1, 1, 5)
+          .clearFormat()
+          .setBackground(null)
+          .setFontColor("#ffffff");
       }
       
       var startRowHeader = sheetAmort.getLastRow() + 1;
@@ -173,7 +187,9 @@ function registrarNuevo() {
       sheetAmort.appendRow([fechaDesembolsoStr, 0, 0, 0, monto]);
       
       var saldoActual = monto;
-      var cuotaExacta = (tasaDecimal > 0) ? (monto * tasaDecimal) / (1 - Math.pow(1 + tasaDecimal, -plazo)) : (monto / plazo);
+      var cuotaExacta = (tasaDecimal > 0)
+        ? (monto * tasaDecimal) / (1 - Math.pow(1 + tasaDecimal, -plazo))
+        : (monto / plazo);
       
       for (var i = 1; i <= plazo; i++) {
         var fechaCuotaStr = getPaymentDate(fechaInicio, i);
@@ -187,22 +203,32 @@ function registrarNuevo() {
         var saldoMostrar = (i === plazo) ? 0 : Math.round(saldoNuevo * 100) / 100;
         
         saldoActual = saldoNuevo;
-        sheetAmort.appendRow([fechaCuotaStr, cuotaMostrar, abonoKMostrar, intMostrar, Math.max(0, saldoMostrar)]);
+        sheetAmort.appendRow([
+          fechaCuotaStr, cuotaMostrar, abonoKMostrar, intMostrar, Math.max(0, saldoMostrar)
+        ]);
       }
       
       var endRowTable = sheetAmort.getLastRow();
       var numTableRows = endRowTable - startRowHeader + 1;
       
       var headerRange = sheetAmort.getRange(startRowHeader, 1, 1, 5);
-      headerRange.setBackground("#1e3a8a").setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
+      headerRange.setBackground("#1e3a8a")
+        .setFontColor("#ffffff")
+        .setFontWeight("bold")
+        .setHorizontalAlignment("center");
       
       var dataRange = sheetAmort.getRange(startRowHeader + 1, 1, numTableRows - 1, 5);
       dataRange.setFontColor("#000000").setFontFamily("Roboto");
-      sheetAmort.getRange(startRowHeader + 1, 1, numTableRows - 1, 1).setHorizontalAlignment("left");
-      sheetAmort.getRange(startRowHeader + 1, 2, numTableRows - 1, 4).setHorizontalAlignment("right");
-      sheetAmort.getRange(startRowHeader + 1, 2, numTableRows - 1, 4).setNumberFormat("$#,##0.00");
+      sheetAmort.getRange(startRowHeader + 1, 1, numTableRows - 1, 1)
+        .setHorizontalAlignment("left");
+      sheetAmort.getRange(startRowHeader + 1, 2, numTableRows - 1, 4)
+        .setHorizontalAlignment("right");
+      sheetAmort.getRange(startRowHeader + 1, 2, numTableRows - 1, 4)
+        .setNumberFormat("$#,##0.00");
       
-      sheetAmort.getRange(startRowHeader + 1, 1, 1, 5).setBackground("#e6f4ea").setFontWeight("bold");
+      sheetAmort.getRange(startRowHeader + 1, 1, 1, 5)
+        .setBackground("#e6f4ea")
+        .setFontWeight("bold");
       sheetAmort.setColumnWidth(1, 145);
       sheetAmort.setColumnWidth(2, 125);
       sheetAmort.setColumnWidth(3, 125);
@@ -213,7 +239,9 @@ function registrarNuevo() {
   
   colorearFlujoPrestamos();
   
-  SpreadsheetApp.getUi().alert("✅ ¡Registro completado con éxito!\n\nParticipante: " + nombre);
+  SpreadsheetApp.getUi().alert(
+    "✅ ¡Registro completado con éxito!\n\nParticipante: " + nombre
+  );
   sheetForm.getRange("C6").setValue("");
   sheetForm.getRange("C10").setValue("");
   sheetForm.getRange("C14").setValue("");
@@ -293,10 +321,13 @@ function repararTodasLasFormulas() {
   for (var i = 0; i < count; i++) {
     var r = i + 2;
     formulasK.push(["=I" + r + "-J" + r]);
-    formulasL.push(['=IF(ISBLANK(A' + r + '), "", IF(K' + r + '<=5, "Cancelado", "Activo"))']);
+    formulasL.push([
+      '=IF(ISBLANK(A' + r + '), "", IF(K' + r + '<=5, "Cancelado", "Activo"))'
+    ]);
     var condCancel = 'REGEXMATCH(UPPER(L' + r + '), "CANCEL|PAGAD|FINALIZ")';
     var condSaldoK = 'AND(ISNUMBER(K' + r + '), K' + r + '<=5)';
-    var formulaM = '=IF(ISBLANK(A' + r + '), "", IF(OR(' + condCancel + ', ' + condSaldoK + '), H' + r + ', 0))';
+    var formulaM = '=IF(ISBLANK(A' + r + '), "", IF(OR(' +
+      condCancel + ', ' + condSaldoK + '), H' + r + ', 0))';
     formulasM.push([formulaM]);
   }
   
@@ -339,10 +370,20 @@ function parseFechaInicio(val) {
     var parts = val.trim().split(/[\/\-\.]/);
     if (parts.length === 3) {
       if (parts[0].length <= 2 && parts[2].length === 4) {
-        return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10), 12, 0, 0);
+        return new Date(
+          parseInt(parts[2], 10),
+          parseInt(parts[1], 10) - 1,
+          parseInt(parts[0], 10),
+          12, 0, 0
+        );
       }
       if (parts[0].length === 4) {
-        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10), 12, 0, 0);
+        return new Date(
+          parseInt(parts[0], 10),
+          parseInt(parts[1], 10) - 1,
+          parseInt(parts[0], 10),
+          12, 0, 0
+        );
       }
     }
   }
@@ -372,13 +413,13 @@ function onOpen() {
   ui.createMenu("⚡ Fondo Vecinos")
     .addItem("🔘 Aplicar Liquidación a Resumen General (C23)", "aplicarLiquidacionAResumen")
     .addSeparator()
-    .addItem("🔄 Actualizar Amortizaciones Anteriores al Sistema Francés", "actualizarAmortizacionesAnteriores")
-    .addItem("Configurar Fila de Liquidaciones en RESUMEN GENERAL", "configurarFilaLiquidacionesManual")
+    .addItem("🔄 Actualizar Amortizaciones Anteriores al Sistema Francés",
+             "actualizarAmortizacionesAnteriores")
+    .addItem("Configurar Fila de Liquidaciones en RESUMEN GENERAL",
+             "configurarFilaLiquidacionesManual")
     .addItem("Reparar Fórmulas Flujo Préstamos", "repararTodasLasFormulas")
     .addToUi();
 }
-
-
 
 /**
  * ASEGURA QUE EXISTA LA PESTAÑA 'HISTORIAL LIQUIDACIONES'
@@ -451,10 +492,12 @@ function asegurarFilaLiquidacionesEnResumen(ss) {
   
   // Si la fila ya existe
   if (filaLiq !== -1) {
-    sheetResumen.getRange("C" + filaLiq).setFormula("=IFERROR(SUM('HISTORIAL LIQUIDACIONES'!H2:H), 0)");
+    sheetResumen.getRange("C" + filaLiq)
+      .setFormula("=IFERROR(SUM('HISTORIAL LIQUIDACIONES'!H2:H), 0)");
     sheetResumen.getRange("C" + filaLiq).setNumberFormat("$#,##0");
     if (filaTotal !== -1 && filaBanco !== -1 && filaCaja !== -1) {
-      sheetResumen.getRange("C" + filaTotal).setFormula("=C" + filaBanco + "-C" + filaCaja + "-C" + filaLiq);
+      sheetResumen.getRange("C" + filaTotal)
+        .setFormula("=C" + filaBanco + "-C" + filaCaja + "-C" + filaLiq);
     }
     return filaLiq;
   }
@@ -472,7 +515,8 @@ function asegurarFilaLiquidacionesEnResumen(ss) {
   sheetResumen.getRange("B" + insertAt).setValue("LIQUIDACIONES PAGADAS (SOCIOS RETIRADOS)")
     .setFontWeight("bold")
     .setFontColor("#991b1b");
-  sheetResumen.getRange("C" + insertAt).setFormula("=IFERROR(SUM('HISTORIAL LIQUIDACIONES'!H2:H), 0)")
+  sheetResumen.getRange("C" + insertAt)
+    .setFormula("=IFERROR(SUM('HISTORIAL LIQUIDACIONES'!H2:H), 0)")
     .setNumberFormat("$#,##0")
     .setFontWeight("bold")
     .setBackground("#fee2e2")
@@ -482,12 +526,16 @@ function asegurarFilaLiquidacionesEnResumen(ss) {
   if (filaBanco === -1) filaBanco = insertAt - 2;
   if (filaCaja === -1) filaCaja = insertAt - 1;
   sheetResumen.getRange("B" + nuevaFilaTotal).setValue("TOTAL").setFontWeight("bold");
-  sheetResumen.getRange("C" + nuevaFilaTotal).setFormula("=C" + filaBanco + "-C" + filaCaja + "-C" + insertAt)
+  sheetResumen.getRange("C" + nuevaFilaTotal)
+    .setFormula("=C" + filaBanco + "-C" + filaCaja + "-C" + insertAt)
     .setNumberFormat("$#,##0")
     .setFontWeight("bold");
     
   // Bordes
-  sheetResumen.getRange("B" + insertAt + ":C" + nuevaFilaTotal).setBorder(true, true, true, true, true, true, "#cbd5e1", SpreadsheetApp.BorderStyle.SOLID);
+  sheetResumen.getRange("B" + insertAt + ":C" + nuevaFilaTotal).setBorder(
+    true, true, true, true, true, true, "#cbd5e1",
+    SpreadsheetApp.BorderStyle.SOLID
+  );
   
   return insertAt;
 }
@@ -499,18 +547,13 @@ function configurarFilaLiquidacionesManual() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   asegurarHistorialLiquidaciones(ss);
   asegurarFilaLiquidacionesEnResumen(ss);
-  SpreadsheetApp.getUi().alert("Configuracion Exitosa: Fila de liquidaciones configurada correctamente en RESUMEN GENERAL.");
+  SpreadsheetApp.getUi().alert(
+    "Configuracion Exitosa: Fila de liquidaciones configurada correctamente en RESUMEN GENERAL."
+  );
 }
 
 /**
  * APLICAR LIQUIDACIÓN AL RESUMEN GENERAL (BOTÓN EN PESTAÑA LIQUIDADOR)
- * 
- * 1. Toma exclusivamente el valor neto a liquidar de la celda C23 de LIQUIDADOR.
- * 2. Lee los datos informativos del socio (C4, C5, C6) para el comprobante.
- * 3. Solicita confirmación en pantalla antes de proceder.
- * 4. Guarda el comprobante contable en la pestaña 'HISTORIAL LIQUIDACIONES'.
- * 5. Crea o actualiza la fila de descuento en 'RESUMEN GENERAL' (debajo de CAJA EFECTIVO y antes del TOTAL).
- * 6. NO altera los nombres ni las fórmulas en CONTROL AHORRO, WHATSAPP ni en el LIQUIDADOR.
  */
 function aplicarLiquidacionAResumen() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -527,7 +570,10 @@ function aplicarLiquidacionAResumen() {
   var netoPagar = parseFloat(valNetoRaw);
   
   if (isNaN(netoPagar) || netoPagar <= 0) {
-    ui.alert("Atencion: La celda C23 esta vacia o en cero. Defina la liquidacion en LIQUIDADOR antes de presionar el boton.");
+    ui.alert(
+      "Atencion: La celda C23 esta vacia o en cero. " +
+      "Defina la liquidacion en LIQUIDADOR antes de presionar el boton."
+    );
     return;
   }
   
@@ -545,12 +591,14 @@ function aplicarLiquidacionAResumen() {
     fechaLiqStr = formatDateDDMMYYYY(new Date());
   }
   
-  var motivo = (sheetLiq.getRange("C6").getValue() || "").toString().trim() || "Retiro voluntario / Liquidacion";
+  var motivo = (sheetLiq.getRange("C6").getValue() || "").toString().trim() ||
+    "Retiro voluntario / Liquidacion";
   var totalAportes = parseFloat(sheetLiq.getRange("C11").getValue()) || 0;
   var utilRifas = parseFloat(sheetLiq.getRange("C12").getValue()) || 0;
   var intGanados = parseFloat(sheetLiq.getRange("C13").getValue()) || 0;
   var totalDeducciones = parseFloat(sheetLiq.getRange("C21").getValue()) || 0;
-  var formattedNeto = "$" + Math.round(netoPagar).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  var formattedNeto = "$" + Math.round(netoPagar).toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
   
   // 3. Confirmación previa en pantalla
   var mensajeConfirmacion = "¿Desea aplicar y descontar esta liquidacion en el Fondo?\n\n" +
@@ -564,7 +612,11 @@ function aplicarLiquidacionAResumen() {
     "3. El Total del Fondo restara este valor automaticamente.\n" +
     "4. Tus tablas de CONTROL AHORRO y prestamos no se modificaran.";
     
-  var respuesta = ui.alert("Confirmar Aplicacion de Liquidacion", mensajeConfirmacion, ui.ButtonSet.YES_NO);
+  var respuesta = ui.alert(
+    "Confirmar Aplicacion de Liquidacion",
+    mensajeConfirmacion,
+    ui.ButtonSet.YES_NO
+  );
   if (respuesta !== ui.Button.YES) {
     ui.alert("Operacion cancelada: No se realizo ninguna modificacion.");
     return;
@@ -700,7 +752,8 @@ function actualizarAmortizacionesAnteriores() {
         var vCuota = amortValues[endPay][1];
         var vColA = String(amortValues[endPay][0] || "").trim();
         var vCuotaStr = String(vCuota || "").trim().toUpperCase();
-        if (vCuota === "" || vCuota === null || vCuota === undefined || vColA.indexOf("#") === 0 || vCuotaStr === "CUOTA") {
+        if (vCuota === "" || vCuota === null || vCuota === undefined ||
+            vColA.indexOf("#") === 0 || vCuotaStr === "CUOTA") {
           break;
         }
         endPay++;
@@ -719,14 +772,17 @@ function actualizarAmortizacionesAnteriores() {
           abonoSum += (parseFloat(amortValues[p][2]) || 0);
         }
         
-        var isPlano = (numCuotas >= 2 && Math.abs(primerAbono - segundoAbono) < 0.01) || (numCuotas === 1 && initBalActual > abonoSum);
+        var isPlano = (numCuotas >= 2 && Math.abs(primerAbono - segundoAbono) < 0.01) ||
+                      (numCuotas === 1 && initBalActual > abonoSum);
         
         if (isPlano || initBalActual > (abonoSum * 1.01)) {
           var matchedLoan = null;
           var candidates = [];
           for (var l = 0; l < loans.length; l++) {
             var lName = loans[l].cleanName;
-            if (lName === cleanHeader || lName.indexOf(cleanHeader) !== -1 || cleanHeader.indexOf(lName) !== -1) {
+            if (lName === cleanHeader ||
+                lName.indexOf(cleanHeader) !== -1 ||
+                cleanHeader.indexOf(lName) !== -1) {
               candidates.push(loans[l]);
             }
           }
@@ -737,7 +793,8 @@ function actualizarAmortizacionesAnteriores() {
             matchedLoan = candidates[0];
             var minDiff = 999999999;
             for (var c = 0; c < candidates.length; c++) {
-              var diff = Math.abs(candidates[c].plazo - numCuotas) * 10000000 + Math.abs(candidates[c].monto - abonoSum);
+              var diff = Math.abs(candidates[c].plazo - numCuotas) * 10000000 +
+                         Math.abs(candidates[c].monto - abonoSum);
               if (diff < minDiff) {
                 minDiff = diff;
                 matchedLoan = candidates[c];
@@ -749,16 +806,19 @@ function actualizarAmortizacionesAnteriores() {
             var mMonto = matchedLoan.monto;
             var mTasa = matchedLoan.tasa;
             var mPlazo = numCuotas;
-            var mCuotaExacta = (mTasa > 0) ? (mMonto * mTasa) / (1 - Math.pow(1 + mTasa, -mPlazo)) : (mMonto / mPlazo);
+            var mCuotaExacta = (mTasa > 0)
+              ? (mMonto * mTasa) / (1 - Math.pow(1 + mTasa, -mPlazo))
+              : (mMonto / mPlazo);
             
             // Actualizar encabezado para incluir ID correcto
-            var newHeaderStr = "# " + matchedLoan.id + " - " + matchedLoan.nombre + " (" + matchedLoan.tipo.toUpperCase() + ")";
+            var newHeaderStr = "# " + matchedLoan.id + " - " +
+              matchedLoan.nombre + " (" + matchedLoan.tipo.toUpperCase() + ")";
             sheetAmort.getRange(headerRowIdx, 1).setValue(newHeaderStr);
             
             // Actualizar fila desembolso (Col E = Monto real de capital)
             sheetAmort.getRange(desembolsoRowIdx, 2, 1, 4).setValues([[0, 0, 0, mMonto]]);
             
-            // Recalcular cuotas
+            // Recalcular cuotas con amortización francesa dinámica
             var saldoActual = mMonto;
             var cuotasNuevas = [];
             
@@ -773,13 +833,16 @@ function actualizarAmortizacionesAnteriores() {
               var saldoMostrar = (i === mPlazo) ? 0 : Math.round(saldoNuevo * 100) / 100;
               
               saldoActual = saldoNuevo;
-              cuotasNuevas.push([cuotaMostrar, abonoKMostrar, intMostrar, Math.max(0, saldoMostrar)]);
+              cuotasNuevas.push([
+                cuotaMostrar, abonoKMostrar, intMostrar, Math.max(0, saldoMostrar)
+              ]);
             }
             
             sheetAmort.getRange(firstPayRowIdx, 2, numCuotas, 4).setValues(cuotasNuevas);
             
             // Formatear columnas B a E como moneda
-            sheetAmort.getRange(desembolsoRowIdx, 2, numCuotas + 1, 4).setNumberFormat("$#,##0.00");
+            sheetAmort.getRange(desembolsoRowIdx, 2, numCuotas + 1, 4)
+              .setNumberFormat("$#,##0.00");
             updatedCount++;
           }
         }
@@ -791,7 +854,10 @@ function actualizarAmortizacionesAnteriores() {
     }
   }
   
-  SpreadsheetApp.getUi().alert("✅ ¡Proceso completado con éxito!\n\nSe actualizaron " + updatedCount + " tablas de amortización al formato francés dinámico.");
+  SpreadsheetApp.getUi().alert(
+    "✅ ¡Proceso completado con éxito!\n\n" +
+    "Se actualizaron " + updatedCount + " tablas de amortización al formato francés dinámico."
+  );
 }
 
 /**
@@ -800,6 +866,7 @@ function actualizarAmortizacionesAnteriores() {
 function cleanPersonNameHelper(nameStr) {
   if (!nameStr) return "";
   var s = String(nameStr).toUpperCase();
-  s = s.replace(/[\#\-\d]|(\(CRÉDITO\))|(\(SOCIO\))|(\(CREDITO\))|(\(TERCERO\))|TERCERO|SOCIO|CREDITO|CRÉDITO/gi, "");
+  var regexLimpieza = /[\#\-\d]|(\([A-ZÁÉÍÓÚ ]+\))|TERCERO|SOCIO|CREDITO|CRÉDITO/gi;
+  s = s.replace(regexLimpieza, "");
   return s.replace(/\s+/g, " ").trim();
 }
