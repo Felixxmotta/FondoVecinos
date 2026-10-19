@@ -170,19 +170,24 @@ function registrarNuevo() {
       sheetAmort.appendRow([headerNombre, "CUOTA", "ABONO A K", "INTERESES", "SALDO"]);
       
       var fechaDesembolsoStr = formatDateDDMMYYYY(fechaInicio);
-      sheetAmort.appendRow([fechaDesembolsoStr, 0, 0, 0, totalAPagar]);
+      sheetAmort.appendRow([fechaDesembolsoStr, 0, 0, 0, monto]);
       
-      var saldoActual = totalAPagar;
-      var abonoCapitalBase = Math.round((monto / plazo) * 100) / 100;
-      var interesBase = Math.round((totalInteres / plazo) * 100) / 100;
+      var saldoActual = monto;
+      var cuotaExacta = (tasaDecimal > 0) ? (monto * tasaDecimal) / (1 - Math.pow(1 + tasaDecimal, -plazo)) : (monto / plazo);
       
       for (var i = 1; i <= plazo; i++) {
         var fechaCuotaStr = getPaymentDate(fechaInicio, i);
-        var abonoK = (i === plazo) ? Math.round((monto - (abonoCapitalBase * (plazo - 1))) * 100) / 100 : abonoCapitalBase;
-        var intCuota = (i === plazo) ? Math.round((totalInteres - (interesBase * (plazo - 1))) * 100) / 100 : interesBase;
-        saldoActual = (i === plazo) ? 0 : Math.round((saldoActual - cuotaFija) * 100) / 100;
+        var interesExacto = saldoActual * tasaDecimal;
+        var abonoKExacto = (i === plazo) ? saldoActual : (cuotaExacta - interesExacto);
+        var saldoNuevo = (i === plazo) ? 0 : (saldoActual - abonoKExacto);
         
-        sheetAmort.appendRow([fechaCuotaStr, cuotaFija, abonoK, intCuota, Math.max(0, saldoActual)]);
+        var cuotaMostrar = Math.round(cuotaExacta * 100) / 100;
+        var abonoKMostrar = Math.round(abonoKExacto * 100) / 100;
+        var intMostrar = Math.round(interesExacto * 100) / 100;
+        var saldoMostrar = (i === plazo) ? 0 : Math.round(saldoNuevo * 100) / 100;
+        
+        saldoActual = saldoNuevo;
+        sheetAmort.appendRow([fechaCuotaStr, cuotaMostrar, abonoKMostrar, intMostrar, Math.max(0, saldoMostrar)]);
       }
       
       var endRowTable = sheetAmort.getLastRow();
@@ -195,6 +200,7 @@ function registrarNuevo() {
       dataRange.setFontColor("#000000").setFontFamily("Roboto");
       sheetAmort.getRange(startRowHeader + 1, 1, numTableRows - 1, 1).setHorizontalAlignment("left");
       sheetAmort.getRange(startRowHeader + 1, 2, numTableRows - 1, 4).setHorizontalAlignment("right");
+      sheetAmort.getRange(startRowHeader + 1, 2, numTableRows - 1, 4).setNumberFormat("$#,##0.00");
       
       sheetAmort.getRange(startRowHeader + 1, 1, 1, 5).setBackground("#e6f4ea").setFontWeight("bold");
       sheetAmort.setColumnWidth(1, 145);
@@ -366,6 +372,7 @@ function onOpen() {
   ui.createMenu("⚡ Fondo Vecinos")
     .addItem("🔘 Aplicar Liquidación a Resumen General (C23)", "aplicarLiquidacionAResumen")
     .addSeparator()
+    .addItem("🔄 Actualizar Amortizaciones Anteriores al Sistema Francés", "actualizarAmortizacionesAnteriores")
     .addItem("Configurar Fila de Liquidaciones en RESUMEN GENERAL", "configurarFilaLiquidacionesManual")
     .addItem("Reparar Fórmulas Flujo Préstamos", "repararTodasLasFormulas")
     .addToUi();
@@ -603,4 +610,196 @@ function aplicarLiquidacionAResumen() {
  */
 function procesarLiquidacion() {
   aplicarLiquidacionAResumen();
+}
+
+/**
+ * ACTUALIZAR AMORTIZACIONES ANTERIORES AL SISTEMA FRANCÉS DINÁMICO
+ * 
+ * Recorre la hoja AMORTIZACIONES, detecta las tablas que fueron creadas con el saldo inicial
+ * igual al total a pagar o con abonos estáticos, y las recalcula usando el sistema francés:
+ * - Saldo inicial = Capital desembolsado (monto real prestado).
+ * - Intereses = Saldo anterior * tasa.
+ * - Abono a Capital = Cuota - Intereses.
+ * - Saldo = Saldo anterior - Abono a Capital.
+ * Conserva intactas todas las fechas de desembolso y de cada cuota.
+ */
+function actualizarAmortizacionesAnteriores() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  
+  var sheetAmort = getSheetFlexible(ss, "AMORTIZACIONES");
+  var sheetFlujo = getSheetFlexible(ss, "FLUJO PRESTAMOS");
+  
+  if (!sheetAmort || !sheetFlujo) {
+    ui.alert("⚠️ Error: No se encontraron las pestañas 'AMORTIZACIONES' o 'FLUJO PRESTAMOS'.");
+    return;
+  }
+  
+  var confirm = ui.alert(
+    "Actualizar Tablas de Amortización al Sistema Francés",
+    "Esta función actualizará las tablas de amortización que tenían abonos fijos o saldo inicial inflado:\n\n" +
+    "• Saldo inicial mostrará el capital prestado (Monto real desembolsado).\n" +
+    "• Intereses y Abonos a Capital variarán dinámicamente mes a mes según el saldo real.\n" +
+    "• Las fechas de desembolso y de cada cuota se mantendrán intactas.\n" +
+    "• No afectará fórmulas ni datos de otras pestañas.\n\n" +
+    "¿Desea proceder?",
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (confirm !== ui.Button.YES) {
+    ui.alert("Operación cancelada. No se realizaron cambios.");
+    return;
+  }
+  
+  // 1. Cargar créditos de FLUJO PRESTAMOS
+  var lastRowFlujo = sheetFlujo.getLastRow();
+  var flujoData = sheetFlujo.getRange(2, 1, Math.max(1, lastRowFlujo - 1), 7).getValues();
+  var loans = [];
+  
+  for (var f = 0; f < flujoData.length; f++) {
+    var rawId = flujoData[f][0];
+    var rawNom = String(flujoData[f][1] || "").trim();
+    var rawTipo = String(flujoData[f][2] || "").trim();
+    var rawMonto = parseFloat(flujoData[f][3]) || 0;
+    var rawTasa = parseFloat(flujoData[f][4]) || 0;
+    var rawPlazo = parseInt(flujoData[f][5]) || 0;
+    var rawCuota = parseFloat(flujoData[f][6]) || 0;
+    
+    if (rawNom !== "" && rawMonto > 0) {
+      loans.push({
+        id: rawId,
+        nombre: rawNom,
+        tipo: rawTipo,
+        monto: rawMonto,
+        tasa: (rawTasa > 1) ? (rawTasa / 100.0) : rawTasa,
+        plazo: rawPlazo,
+        cuota: rawCuota,
+        cleanName: cleanPersonNameHelper(rawNom)
+      });
+    }
+  }
+  
+  // 2. Escanear AMORTIZACIONES para encontrar bloques de tablas
+  var lastRowAmort = sheetAmort.getLastRow();
+  var amortValues = sheetAmort.getRange(1, 1, lastRowAmort, 5).getValues();
+  
+  var updatedCount = 0;
+  var r = 0;
+  
+  while (r < amortValues.length) {
+    var valColA = String(amortValues[r][0] || "").trim();
+    var valColB = String(amortValues[r][1] || "").trim().toUpperCase();
+    
+    if (valColB === "CUOTA") {
+      var headerRowIdx = r + 1; // 1-indexed para rangos de la hoja
+      var desembolsoRowIdx = headerRowIdx + 1;
+      var firstPayRowIdx = desembolsoRowIdx + 1;
+      
+      var endPay = r + 2;
+      while (endPay < amortValues.length) {
+        var vCuota = amortValues[endPay][1];
+        var vColA = String(amortValues[endPay][0] || "").trim();
+        var vCuotaStr = String(vCuota || "").trim().toUpperCase();
+        if (vCuota === "" || vCuota === null || vCuota === undefined || vColA.indexOf("#") === 0 || vCuotaStr === "CUOTA") {
+          break;
+        }
+        endPay++;
+      }
+      
+      var numCuotas = endPay - (r + 2);
+      var cleanHeader = cleanPersonNameHelper(valColA);
+      
+      if (cleanHeader !== "" && numCuotas >= 1) {
+        var initBalActual = parseFloat(amortValues[r + 1][4]) || 0;
+        var primerAbono = (numCuotas >= 1) ? (parseFloat(amortValues[r + 2][2]) || 0) : 0;
+        var segundoAbono = (numCuotas >= 2) ? (parseFloat(amortValues[r + 3][2]) || 0) : 0;
+        
+        var abonoSum = 0;
+        for (var p = r + 2; p < endPay; p++) {
+          abonoSum += (parseFloat(amortValues[p][2]) || 0);
+        }
+        
+        var isPlano = (numCuotas >= 2 && Math.abs(primerAbono - segundoAbono) < 0.01) || (numCuotas === 1 && initBalActual > abonoSum);
+        
+        if (isPlano || initBalActual > (abonoSum * 1.01)) {
+          var matchedLoan = null;
+          var candidates = [];
+          for (var l = 0; l < loans.length; l++) {
+            var lName = loans[l].cleanName;
+            if (lName === cleanHeader || lName.indexOf(cleanHeader) !== -1 || cleanHeader.indexOf(lName) !== -1) {
+              candidates.push(loans[l]);
+            }
+          }
+          
+          if (candidates.length === 1) {
+            matchedLoan = candidates[0];
+          } else if (candidates.length > 1) {
+            matchedLoan = candidates[0];
+            var minDiff = 999999999;
+            for (var c = 0; c < candidates.length; c++) {
+              var diff = Math.abs(candidates[c].plazo - numCuotas) * 10000000 + Math.abs(candidates[c].monto - abonoSum);
+              if (diff < minDiff) {
+                minDiff = diff;
+                matchedLoan = candidates[c];
+              }
+            }
+          }
+          
+          if (matchedLoan) {
+            var mMonto = matchedLoan.monto;
+            var mTasa = matchedLoan.tasa;
+            var mPlazo = numCuotas;
+            var mCuotaExacta = (mTasa > 0) ? (mMonto * mTasa) / (1 - Math.pow(1 + mTasa, -mPlazo)) : (mMonto / mPlazo);
+            
+            // Actualizar encabezado para incluir ID correcto
+            var newHeaderStr = "# " + matchedLoan.id + " - " + matchedLoan.nombre + " (" + matchedLoan.tipo.toUpperCase() + ")";
+            sheetAmort.getRange(headerRowIdx, 1).setValue(newHeaderStr);
+            
+            // Actualizar fila desembolso (Col E = Monto real de capital)
+            sheetAmort.getRange(desembolsoRowIdx, 2, 1, 4).setValues([[0, 0, 0, mMonto]]);
+            
+            // Recalcular cuotas
+            var saldoActual = mMonto;
+            var cuotasNuevas = [];
+            
+            for (var i = 1; i <= mPlazo; i++) {
+              var interesExacto = saldoActual * mTasa;
+              var abonoKExacto = (i === mPlazo) ? saldoActual : (mCuotaExacta - interesExacto);
+              var saldoNuevo = (i === mPlazo) ? 0 : (saldoActual - abonoKExacto);
+              
+              var cuotaMostrar = Math.round(mCuotaExacta * 100) / 100;
+              var abonoKMostrar = Math.round(abonoKExacto * 100) / 100;
+              var intMostrar = Math.round(interesExacto * 100) / 100;
+              var saldoMostrar = (i === mPlazo) ? 0 : Math.round(saldoNuevo * 100) / 100;
+              
+              saldoActual = saldoNuevo;
+              cuotasNuevas.push([cuotaMostrar, abonoKMostrar, intMostrar, Math.max(0, saldoMostrar)]);
+            }
+            
+            sheetAmort.getRange(firstPayRowIdx, 2, numCuotas, 4).setValues(cuotasNuevas);
+            
+            // Formatear columnas B a E como moneda
+            sheetAmort.getRange(desembolsoRowIdx, 2, numCuotas + 1, 4).setNumberFormat("$#,##0.00");
+            updatedCount++;
+          }
+        }
+      }
+      
+      r = endPay;
+    } else {
+      r++;
+    }
+  }
+  
+  SpreadsheetApp.getUi().alert("✅ ¡Proceso completado con éxito!\n\nSe actualizaron " + updatedCount + " tablas de amortización al formato francés dinámico.");
+}
+
+/**
+ * HELPER PARA NORMALIZAR NOMBRES EN Apps Script
+ */
+function cleanPersonNameHelper(nameStr) {
+  if (!nameStr) return "";
+  var s = String(nameStr).toUpperCase();
+  s = s.replace(/[\#\-\d]|(\(CRÉDITO\))|(\(SOCIO\))|(\(CREDITO\))|(\(TERCERO\))|TERCERO|SOCIO|CREDITO|CRÉDITO/gi, "");
+  return s.replace(/\s+/g, " ").trim();
 }
