@@ -1181,7 +1181,7 @@ def generate_whatsapp_message(selected_person, user_type_label, user_status_eval
                             msg += f"   - Saldo Restante: {fmt_money(s_num, show_decimals=True)}\n"
 
     msg += f"\n-----------------------------------------\n"
-    msg += f"_Fondo de Vecinos - Gestión Transparente_"
+    msg += f"_Fondo de ahorro Amigos de la Mesa_"
     return msg
 
 def generate_whatsapp_fund_message(df_resumen, recipient_name=None):
@@ -1217,7 +1217,7 @@ def generate_whatsapp_fund_message(df_resumen, recipient_name=None):
     msg += f"• Caja Efectivo: {fmt_money(caja_efectivo_val)}\n"
     msg += f"• Total Disponible: {fmt_money(total_disponible_val, show_decimals=True)}\n"
     msg += f"-----------------------------------------\n"
-    msg += f"_Fondo de Vecinos - Gestión Transparente_"
+    msg += f"_Fondo de ahorro Amigos de la Mesa_"
     return msg
 
 def compute_person_financials(person_name, df_ahorros, df_flujo, df_whatsapp, socios_list, df_resumen, df_liquidaciones=None, amort_tables=None):
